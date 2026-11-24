@@ -18,11 +18,8 @@ import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MemoryHud } from '../MemoryHud';
-import { MiraComms } from '../MiraComms';
-import { MissionHeader } from '../MissionHeader';
+import { MissionStageLayout } from '../MissionStageLayout';
 import { ScannerCanvas } from '../stages/ScannerCanvas';
-import { TimelineBar } from '../TimelineBar';
 
 export interface Ch06MissionProps {
   lang: Lang;
@@ -80,13 +77,41 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
     mood: 'alert',
     text:
       lang === 'zh-Hant'
-        ? '雜訊幻影把訊號切得支離破碎！按 STEP PULSE 逐格掃描 "OOXOOOXO"，看清楚遇 X 時 CURRENT 歸零但 BEST 保留下來的節奏！'
-        : 'NOISE PHANTOM is jamming the feed! Click STEP PULSE across "OOXOOOXO" to watch CURRENT reset on X while BEST preserves the peak!',
+        ? '逐格步進掃描 "OOXOOOXO"，觀察遇 X 時 current 歸零但 best 保留最高峰的節奏，再鎖定最佳值！'
+        : 'Step through "OOXOOOXO" to watch current reset on X while best preserves the peak streak!',
   });
 
   useEffect(() => {
     return () => timersRef.current.forEach((id) => window.clearTimeout(id));
   }, []);
+
+  useEffect(() => {
+    if (phase === 'breach') {
+      setMira({
+        mood: 'neutral',
+        text:
+          lang === 'zh-Hant'
+            ? '四道演算法鎖涵蓋累積極值、雙計數器與數字拆解，小心負數陷阱！'
+            : 'Four algorithm locks test extrema, streak tracking, and digit peeling!',
+      });
+    } else if (phase === 'battle') {
+      setMira({
+        mood: 'alert',
+        text:
+          lang === 'zh-Hant'
+            ? '實作 longestRun(readings)：單次掃描維護 cur 與 best，記得安全處理空字串 ""！'
+            : 'Implement longestRun(readings): update cur & best in one pass and handle "" safely.',
+      });
+    } else if (phase === 'debrief') {
+      setMira({
+        mood: 'success',
+        text:
+          lang === 'zh-Hant'
+            ? '雜訊幻影清除完成！準備進入 Act II 壓軸戰 Ch.07 矩陣掃描雷達。'
+            : 'Pulse Scanner online! Ready for the Act II finale: Ch.07 Radar Matrix.',
+      });
+    }
+  }, [phase, lang]);
 
   useEffect(() => {
     if (!chaosSignalTrigger) return;
@@ -137,8 +162,8 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
         mood: 'danger',
         text:
           lang === 'zh-Hant'
-            ? '請先按 STEP PULSE 掃完整段訊號，再填入最長連續 O 的長度 (3)！'
-            : 'Step through the entire signal stream first, then enter the peak consecutive O streak (3)!',
+            ? '請先按 STEP PULSE 掃完整段訊號，再填入最長連續 O 的長度 (3)。'
+            : 'Step through the entire signal stream first, then enter the peak consecutive O streak (3).',
       });
       return;
     }
@@ -153,8 +178,8 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
       mood: 'success',
       text:
         lang === 'zh-Hant'
-          ? '雙計數器追蹤完成！遇到 X 歸零 cur，同時隨時取 max(best, cur)。進入邏輯鎖！'
-          : 'Dual-tracker verified! Reset current on X while continuously protecting best!',
+          ? '雙計數器節奏掌握！遇到 X 歸零 cur 同時守住 best。進入突入！'
+          : 'Dual-tracker verified! Reset current on X while protecting best.',
     });
   };
 
@@ -202,8 +227,8 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
           mood: 'success',
           text:
             lang === 'zh-Hant'
-              ? `9 條訊號全數掃描成功！解鎖 SCANNER AI 晶片並獲得 ${rank} 級評價！`
-              : `All 9 streams decoded cleanly! Earned ${rank}-Rank and unlocked SCANNER AI!`,
+              ? `9 條訊號全數解碼！獲得 ${rank} 級評價與 SCANNER AI！`
+              : `All 9 streams decoded cleanly! Earned ${rank}-Rank and SCANNER AI.`,
         });
       } else {
         onUpdateProgress((p) => ({ ...p, battleMistakes: p.battleMistakes + 1 }));
@@ -226,223 +251,229 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
     [currentFrame, inspectedTrial],
   );
 
+  const brokenShields = battleResult
+    ? battleResult.totalWaves === 1
+      ? progress.rank ? 3 : 0
+      : battleResult.wavesCleared
+    : progress.rank ? 3 : 0;
+
   return (
-    <div className="mission-shell">
-      <MissionHeader
-        meta={meta}
-        lang={lang}
-        phase={phase}
-        progress={progress}
-        battleComplete={battleComplete}
-        onPhaseChange={onPhaseChange}
-      />
-
-      <div className="cockpit-grid">
-        <div className="cockpit-left">
-          <MiraComms mood={mira.mood} message={mira.text} lang={lang} />
-
-          {phase === 'recon' && (
-            <section className="panel-frame chamfer" style={{ padding: 18, display: 'grid', gap: 14 }}>
-              <span className="tac-tag amber">PHASE 01 // LIVE STREAK SCANNER</span>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <button
-                  type="button"
-                  className="tac-btn primary chamfer-sm"
-                  disabled={cursorIdx >= RECON_STREAM.length - 1}
-                  onClick={handleStepRecon}
-                >
-                  <StepForward size={15} />
-                  STEP PULSE ({cursorIdx + 1} / {RECON_STREAM.length})
-                </button>
-                <button
-                  type="button"
-                  className="tac-btn ghost chamfer-sm"
-                  onClick={() => { setCursorIdx(-1); setCurRun(0); setBestRun(0); setReconStatus('idle'); }}
-                >
-                  RESET STREAM
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <label style={{ flex: 1, minWidth: 160, display: 'grid', gap: 4 }}>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--lime)' }}>
-                    {lang === 'zh-Hant' ? '掃描後填寫最長連續 O (Best Peak)：' : 'Final longest consecutive O streak:'}
-                  </span>
-                  <input
-                    type="number"
-                    value={peakGuess}
-                    onChange={(e) => setPeakGuess(e.target.value)}
-                    placeholder="?"
-                    style={{ padding: 9, background: '#050a11', border: '1px solid var(--border-active)', fontFamily: 'var(--font-mono)', fontSize: 16 }}
-                  />
-                </label>
-                <button type="button" className="tac-btn amber chamfer-sm" style={{ minHeight: 42 }} onClick={handleVerifyRecon}>
-                  LOCK PEAK STREAK
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button type="button" className="tac-btn lime chamfer-sm" disabled={!progress.reconDone} onClick={() => { sound.click(); onPhaseChange('breach'); }}>
-                  {lang === 'zh-Hant' ? '前往 Phase 02 掃描鎖' : 'PROCEED TO BREACH'} <ArrowRight size={15} />
-                </button>
-              </div>
-            </section>
-          )}
-
-          {phase === 'breach' && (
-            <BreachPanel
-              locks={CH06_LOCKS}
-              solvedLocks={solvedLocks}
-              lang={lang}
-              tagLabel="ITERATIVE ALGORITHMS"
-              onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
-              onTraceLoaded={(frames) => {
-                setTraceFrames(frames);
-                setStepIdx(0);
-                setAutoPlaySeq((s) => s + 1);
+    <MissionStageLayout
+      stage={
+        <ScannerCanvas
+          mode={phase === 'recon' ? 'recon' : 'battle'}
+          stream={phase === 'recon' ? RECON_STREAM : inspectedTrial?.spec.stream ?? 'OOXOOO'}
+          cursorIndex={phase === 'recon' ? cursorIdx : -1}
+          currentRun={phase === 'recon' ? curRun : 0}
+          bestRun={phase === 'recon' ? bestRun : inspectedTrial?.actual ?? 0}
+          activeFrame={currentFrame}
+          bossShields={3}
+          brokenShields={brokenShields}
+          status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
+        />
+      }
+      bossHud={
+        phase === 'battle'
+          ? { name: 'NOISE PHANTOM', shields: 3, broken: brokenShields }
+          : undefined
+      }
+      mira={mira}
+      traceFrames={traceFrames}
+      stepIdx={stepIdx}
+      onStepChange={setStepIdx}
+      autoPlaySeq={autoPlaySeq}
+      stdout={stdoutShown}
+      lang={lang}
+    >
+      {phase === 'recon' && (
+        <div className="deck-stack">
+          <div className="deck-row-between">
+            <h2 className="deck-heading">
+              {lang === 'zh-Hant' ? '即時雙計數器掃描' : 'Live Streak Scanner'}
+            </h2>
+            <button
+              type="button"
+              className="tac-btn ghost compact-btn"
+              onClick={() => {
+                setCursorIdx(-1);
+                setCurRun(0);
+                setBestRun(0);
+                setReconStatus('idle');
               }}
-              onSolvedLock={(idx, all) => {
-                const next = [...solvedLocks];
-                next[idx] = true;
-                setSolvedLocks(next);
-                if (all) {
-                  onCutIn({ tag: 'SCANNER READY', title: 'ALGORITHM LOCKS CLEARED', tone: 'lime' });
-                  onUpdateProgress((p) => ({
-                    ...p,
-                    breachCleared: true,
-                    completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
-                  }));
-                }
-              }}
-              onProceedToBattle={() => onPhaseChange('battle')}
+            >
+              Reset
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="tac-btn primary deck-primary-cta"
+            disabled={cursorIdx >= RECON_STREAM.length - 1}
+            onClick={handleStepRecon}
+          >
+            <StepForward size={15} />
+            <span>STEP PULSE ({cursorIdx + 1} / {RECON_STREAM.length})</span>
+          </button>
+
+          <label className="deck-field">
+            <span className="deck-field-label mono" style={{ color: 'var(--lime)' }}>
+              {lang === 'zh-Hant' ? '掃描後輸入最長連續 O 長度 (Best Peak)' : 'Final longest consecutive O streak'}
+            </span>
+            <input
+              type="number"
+              className="deck-input mono"
+              value={peakGuess}
+              onChange={(e) => setPeakGuess(e.target.value)}
+              placeholder="?"
             />
-          )}
+          </label>
 
-          {phase === 'battle' && (
-            <section className="panel-frame chamfer" style={{ padding: 16, display: 'grid', gap: 12 }}>
-              <div className="boss-bar chamfer-sm">
-                <div>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--crimson)', fontWeight: 700 }}>SECTOR BOSS // 3-WAVE SIGNAL STREAMS (9 TRIALS)</div>
-                  <strong style={{ fontSize: 15 }}>NOISE PHANTOM</strong>
-                </div>
-                <div className="shield-pips">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className={`shield-pip ${battleResult && i < battleResult.wavesCleared ? 'broken' : ''}`} />
-                  ))}
-                </div>
-              </div>
+          <div className="deck-actions">
+            <button type="button" className={`tac-btn ${progress.reconDone ? 'ghost' : 'amber'} deck-primary-cta`} onClick={handleVerifyRecon}>
+              <span>{lang === 'zh-Hant' ? '鎖定最佳紀錄' : 'LOCK PEAK STREAK'}</span>
+            </button>
 
-              <div style={{ padding: '10px 12px', background: 'rgba(6, 11, 18, 0.72)', borderLeft: '3px solid var(--cyan)', fontSize: 12.5, color: 'var(--ink-secondary)' }}>
-                {lang === 'zh-Hant'
-                  ? '實作 longestRun(readings)：只含 "O" 與 "X"（或空字串 ""），回傳最長連續 "O" 的長度（支援 substring(...).equals("O") 或 charAt(i) == \'O\'）。'
-                  : 'Implement longestRun(readings): return the longest consecutive run of "O" characters (supports substring(i, i+1).equals("O") or charAt(i) == \'O\'). Handle "" safely.'}
-              </div>
-
-              <CodeTerminal
-                value={code}
-                starterCode={CH06_STARTER_CODE}
-                activeLine={currentFrame?.line ?? null}
-                lang={lang}
-                onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, scanner: next } }))}
-              />
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" style={{ minHeight: 42 }} onClick={handleDeployScanner}>
-                  <Zap size={15} />
-                  {t(UI_COPY.runDeploy, lang)}
-                </button>
-                {battleComplete && (
-                  <button type="button" className="tac-btn lime chamfer-sm" onClick={() => { sound.click(); onPhaseChange('debrief'); }}>
-                    {lang === 'zh-Hant' ? '前往 Phase 04 戰報總結' : 'OPEN MISSION DEBRIEF'} →
-                  </button>
-                )}
-              </div>
-
-              {chaosNote && (
-                <div className="tac-tag amber" style={{ justifyContent: 'center', padding: 8 }}>
-                  <Flame size={13} /> {chaosNote}
-                </div>
-              )}
-
-              {battleResult && (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {battleResult.failedTrial?.run.error && (
-                    <div className="mono" style={{ padding: 10, background: 'var(--crimson-dim)', border: '1px solid var(--crimson)', fontSize: 12 }}>
-                      <ShieldAlert size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-                      Line {battleResult.failedTrial.run.error.line}: {battleResult.failedTrial.run.error.message}
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 6 }}>
-                    {battleResult.trials.map((tr) => (
-                      <button
-                        key={tr.spec.id}
-                        type="button"
-                        className={`tac-btn ${tr.passed ? 'lime' : 'crimson'} chamfer-sm`}
-                        style={{ minHeight: 34, padding: '5px 8px', fontSize: 10.5, justifyContent: 'space-between' }}
-                        onClick={() => {
-                          sound.click();
-                          setInspectedTrial(tr);
-                          setTraceFrames(tr.run.frames);
-                          setStepIdx(0);
-                          setAutoPlaySeq((s) => s + 1);
-                        }}
-                      >
-                        <span>W{tr.waveIndex + 1} · "{tr.spec.stream}"</span>
-                        <span>{tr.passed ? `✓ ${tr.actual}` : `✕ ${tr.actual ?? 'ERR'}/${tr.spec.expected}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-
-          {phase === 'debrief' && (
-            <section className="panel-frame chamfer" style={{ padding: 20, display: 'grid', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="tac-tag lime">SIGNALS DECODED // SCANNER AI SYNCED</span>
-                <span className="tac-tag cyan" style={{ fontSize: 16, padding: '6px 14px' }}>RANK {progress.rank ?? 'S'}</span>
-              </div>
-              <h2 style={{ fontSize: 28 }}>{lang === 'zh-Hant' ? '雜訊幻影清除完畢' : 'Pulse Scanner Online'}</h2>
-              <p style={{ color: 'var(--ink-secondary)', fontSize: 13.5 }}>
-                {lang === 'zh-Hant'
-                  ? '你掌握了雙暫存器單次走訪與邊界防呆！最後一站 Act II 決戰：第 07 話《矩陣掃描雷達》。'
-                  : 'You mastered single-pass streak tracking and edge cases! Final Act II sector: Ch.07 Radar Matrix.'}
-              </p>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" onClick={() => { sound.deploy(); onOpenChapter(7); }}>
-                  {lang === 'zh-Hant' ? '下一關：Ch.07 矩陣掃描雷達' : 'NEXT MISSION: CH.07 RADAR MATRIX'} →
-                </button>
-                <button type="button" className="tac-btn ghost chamfer-sm" onClick={() => { sound.click(); onBackToMap(); }}>
-                  {t(UI_COPY.backToMap, lang)}
-                </button>
-              </div>
-            </section>
-          )}
+            {progress.reconDone && (
+              <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.click(); setTraceFrames([]); onPhaseChange('breach'); }}>
+                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
         </div>
+      )}
 
-        <div className="cockpit-right">
-          <ScannerCanvas
-            mode={phase === 'recon' ? 'recon' : 'battle'}
-            stream={phase === 'recon' ? RECON_STREAM : inspectedTrial?.spec.stream ?? 'OOXOOO'}
-            cursorIndex={phase === 'recon' ? cursorIdx : -1}
-            currentRun={phase === 'recon' ? curRun : 0}
-            bestRun={phase === 'recon' ? bestRun : inspectedTrial?.actual ?? 0}
-            activeFrame={currentFrame}
-            bossShields={3}
-            brokenShields={
-              battleResult
-                ? battleResult.totalWaves === 1
-                  ? progress.rank ? 3 : 0
-                  : battleResult.wavesCleared
-                : progress.rank ? 3 : 0
+      {phase === 'breach' && (
+        <BreachPanel
+          locks={CH06_LOCKS}
+          solvedLocks={solvedLocks}
+          lang={lang}
+          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onTraceLoaded={(frames) => {
+            setTraceFrames(frames);
+            setStepIdx(0);
+            setAutoPlaySeq((s) => s + 1);
+          }}
+          onSolvedLock={(idx, all) => {
+            const next = [...solvedLocks];
+            next[idx] = true;
+            setSolvedLocks(next);
+            if (all) {
+              onCutIn({ tag: 'SCANNER READY', title: 'ALGORITHM LOCKS CLEARED', tone: 'lime' });
+              onUpdateProgress((p) => ({
+                ...p,
+                breachCleared: true,
+                completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
+              }));
             }
-            status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
+          }}
+          onProceedToBattle={() => {
+            setTraceFrames([]);
+            setBattleResult(null);
+            onPhaseChange('battle');
+          }}
+        />
+      )}
+
+      {phase === 'battle' && (
+        <div className="deck-stack">
+          <p className="mission-goal">
+            {lang === 'zh-Hant'
+              ? '實作 longestRun(readings)：回傳連續出現最多次 "O" 的長度（支援 substring(...).equals("O") 或 charAt(i) == \'O\'），空字串回傳 0。'
+              : 'Implement longestRun(readings): return the longest consecutive "O" streak (handle "" safely).'}
+          </p>
+
+          <CodeTerminal
+            value={code}
+            starterCode={CH06_STARTER_CODE}
+            activeLine={currentFrame?.line ?? null}
+            lang={lang}
+            onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, scanner: next } }))}
           />
-          <TimelineBar frames={traceFrames} stepIndex={stepIdx} onStepChange={setStepIdx} lang={lang} autoPlayTrigger={autoPlaySeq} />
-          <MemoryHud frame={currentFrame} stdout={stdoutShown} lang={lang} />
+
+          <div className="deck-actions">
+            <button type="button" className="tac-btn primary deck-primary-cta" onClick={handleDeployScanner}>
+              <Zap size={15} />
+              <span>{t(UI_COPY.runDeploy, lang)}</span>
+            </button>
+            {battleComplete && (
+              <button type="button" className="tac-btn lime deck-primary-cta" onClick={() => { sound.click(); onPhaseChange('debrief'); }}>
+                <span>{lang === 'zh-Hant' ? '查看破關結算' : 'OPEN DEBRIEF'}</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
+
+          {chaosNote && (
+            <div className="deck-feedback warn">
+              <Flame size={13} /> <span>{chaosNote}</span>
+            </div>
+          )}
+
+          {battleResult && (
+            <div className="wave-results">
+              {battleResult.failedTrial?.run.error && (
+                <div className="wave-err-line mono" style={{ marginBottom: 6 }}>
+                  <ShieldAlert size={12} />
+                  <span>Line {battleResult.failedTrial.run.error.line}: {battleResult.failedTrial.run.error.message}</span>
+                </div>
+              )}
+              <div className="wave-pills">
+                {battleResult.trials.map((tr) => {
+                  const isSel = inspectedTrial?.spec.id === tr.spec.id;
+                  return (
+                    <button
+                      key={tr.spec.id}
+                      type="button"
+                      className={`wave-pill mono ${tr.passed ? 'pass' : 'fail'} ${isSel ? 'selected' : ''}`}
+                      onClick={() => {
+                        sound.click();
+                        setInspectedTrial(tr);
+                        setTraceFrames(tr.run.frames);
+                        setStepIdx(0);
+                        setAutoPlaySeq((s) => s + 1);
+                      }}
+                    >
+                      <span>W{tr.waveIndex + 1} · "{tr.spec.stream}"</span>
+                      <span>{tr.passed ? `✓ ${tr.actual}` : `✕ ${tr.actual ?? 'ERR'}/${tr.spec.expected}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+
+      {phase === 'debrief' && (
+        <div className="debrief-card">
+          <div className="debrief-rank-row">
+            <div className="debrief-rank">{progress.rank ?? 'S'}</div>
+            <div>
+              <div className="debrief-chip mono">{meta.chipName} SYNCED</div>
+              <h2 className="deck-heading" style={{ marginTop: 4 }}>
+                {lang === 'zh-Hant' ? '雜訊幻影清除完畢' : 'Pulse Scanner Online'}
+              </h2>
+            </div>
+          </div>
+
+          <p className="deck-copy">
+            {lang === 'zh-Hant'
+              ? '你已掌握單次走訪與邊界處理，準備迎接 Act II 最終章 Ch.07 矩陣掃描雷達！'
+              : 'You mastered single-pass streak tracking! Final Act II mission ahead.'}
+          </p>
+
+          <div className="deck-actions">
+            <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.deploy(); onOpenChapter(7); }}>
+              <span>{lang === 'zh-Hant' ? '下一關：Ch.07 矩陣雷達' : 'NEXT: CH.07 RADAR MATRIX'}</span>
+              <ArrowRight size={15} />
+            </button>
+            <button type="button" className="tac-btn ghost" onClick={() => { sound.click(); onBackToMap(); }}>
+              {t(UI_COPY.backToMap, lang)}
+            </button>
+          </div>
+        </div>
+      )}
+    </MissionStageLayout>
   );
 };

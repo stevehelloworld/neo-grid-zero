@@ -64,13 +64,13 @@ const animeTheme = EditorView.theme(
     },
     '.cm-content': {
       caretColor: '#00f0ff',
-      padding: '12px 0',
+      padding: '10px 0',
       fontFamily: 'var(--font-mono)',
     },
     '.cm-gutters': {
       backgroundColor: '#050b12',
       color: '#4e6b80',
-      borderRight: '1px solid rgba(0, 240, 255, 0.14)',
+      borderRight: '1px solid rgba(148, 179, 204, 0.14)',
       fontFamily: 'var(--font-mono)',
     },
     '.cm-activeLineGutter': {
@@ -78,7 +78,7 @@ const animeTheme = EditorView.theme(
       color: '#00f0ff',
     },
     '.cm-activeLine': {
-      backgroundColor: 'rgba(0, 240, 255, 0.05)',
+      backgroundColor: 'rgba(0, 240, 255, 0.04)',
     },
     '.cm-selectionBackground, ::selection': {
       backgroundColor: 'rgba(0, 240, 255, 0.22) !important',
@@ -137,7 +137,6 @@ export const CodeTerminal: React.FC<CodeTerminalProps> = ({
     };
   }, [readOnly]);
 
-  // Keep doc in sync when switching encounters or resetting starter
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
@@ -149,7 +148,6 @@ export const CodeTerminal: React.FC<CodeTerminalProps> = ({
     }
   }, [value]);
 
-  // Highlight active line during trace playback/scrub
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
@@ -157,64 +155,52 @@ export const CodeTerminal: React.FC<CodeTerminalProps> = ({
   }, [activeLine]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)', fontWeight: 700, letterSpacing: '0.08em' }}>
-          JAVA FIRMWARE TERMINAL
-        </span>
-        <div style={{ display: 'flex', gap: 8 }}>
+    <div className="code-terminal-wrap">
+      <div className="code-toolbar">
+        <span className="code-lang-label mono">Java</span>
+        <div className="code-tools">
           <button
             type="button"
-            className="tac-btn ghost"
-            style={{ minHeight: 30, padding: '4px 10px', fontSize: 11 }}
+            className={`code-tool-btn ${showRef ? 'active' : ''}`}
             onClick={() => {
               sound.click();
               setShowRef((s) => !s);
             }}
           >
-            <BookOpen size={13} />
-            {t(UI_COPY.quickRef, lang)}
+            <BookOpen size={12} />
+            <span>{t(UI_COPY.quickRef, lang)}</span>
           </button>
           {starterCode !== undefined && !readOnly && (
             <button
               type="button"
-              className="tac-btn ghost"
-              style={{ minHeight: 30, padding: '4px 10px', fontSize: 11 }}
+              className="code-tool-btn"
               onClick={() => {
                 sound.click();
                 onChange(starterCode);
               }}
             >
-              <RotateCcw size={13} />
-              {t(UI_COPY.resetCode, lang)}
+              <RotateCcw size={12} />
+              <span>{t(UI_COPY.resetCode, lang)}</span>
             </button>
           )}
         </div>
       </div>
 
       {showRef && (
-        <div
-          className="panel-frame chamfer-sm"
-          style={{
-            padding: '10px 14px',
-            borderColor: 'rgba(0, 240, 255, 0.35)',
-            fontSize: 12,
-            color: 'var(--ink-secondary)',
-          }}
-        >
+        <div className="code-quickref">
           {quickRefContent ?? (
-            <div className="mono" style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+            <div className="mono quickref-lines">
               <div><strong style={{ color: 'var(--cyan)' }}>int</strong> · whole numbers: <code>int energy = 120;</code></div>
               <div><strong style={{ color: 'var(--cyan)' }}>double</strong> · decimals: <code>double eff = 0.85;</code></div>
               <div><strong style={{ color: 'var(--cyan)' }}>boolean</strong> · <code>true</code> or <code>false</code></div>
               <div><strong style={{ color: 'var(--cyan)' }}>String</strong> · double quotes: <code>"CLEAR"</code></div>
-              <div><strong style={{ color: 'var(--amber)' }}>if / else if / else</strong> · runs the first true branch only</div>
+              <div><strong style={{ color: 'var(--amber)' }}>if / else if / else</strong> · runs first matching branch only</div>
             </div>
           )}
         </div>
       )}
 
-      <div ref={hostRef} className="cm-wrapper chamfer-sm" aria-label="Java code editor" />
+      <div ref={hostRef} className="cm-wrapper" aria-label="Java code editor" />
     </div>
   );
 };

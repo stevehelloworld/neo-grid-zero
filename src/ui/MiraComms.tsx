@@ -6,12 +6,14 @@ export interface MiraCommsProps {
   mood?: 'neutral' | 'alert' | 'danger' | 'success';
   message: string;
   lang: Lang;
+  docked?: boolean;
 }
 
 export const MiraComms: React.FC<MiraCommsProps> = ({
   mood = 'neutral',
   message,
-  lang,
+  lang: _lang,
+  docked = false,
 }) => {
   const [shown, setShown] = useState(message);
   const [imgErr, setImgErr] = useState(false);
@@ -39,40 +41,26 @@ export const MiraComms: React.FC<MiraCommsProps> = ({
 
   return (
     <section
-      className={`mira-comms chamfer-sm ${mood}`}
+      className={`mira-comms ${docked ? 'docked' : ''} ${mood}`}
       aria-live="polite"
-      aria-label="Mira tactical comms"
+      aria-label="Mira comms"
     >
       <div className="mira-avatar">
         {!imgErr ? (
           <img
             src={portraitSrc}
-            alt="Mira, Tactical Navigator"
+            alt="Mira"
             onError={() => setImgErr(true)}
           />
         ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'grid',
-              placeItems: 'center',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 700,
-              color: 'var(--cyan)',
-            }}
-          >
-            MIRA
-          </div>
+          <div className="mira-fallback mono">MIRA</div>
         )}
       </div>
       <div className="mira-body">
-        <div className="mira-speaker">
-          <span>MIRA // {lang === 'zh-Hant' ? '戰術領航員' : 'TACTICAL NAVIGATOR'}</span>
-          {mood === 'danger' && <span className="tac-tag crimson">ALERT</span>}
-          {mood === 'success' && <span className="tac-tag lime">SYNC</span>}
-        </div>
-        <p key={message} className="mira-text">{shown || message}</p>
+        <p key={message} className="mira-text">
+          <span className="mira-badge mono">MIRA</span>
+          {shown || message}
+        </p>
       </div>
     </section>
   );

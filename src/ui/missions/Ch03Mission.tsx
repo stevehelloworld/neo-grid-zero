@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Flame, Scissors, ShieldAlert, Zap } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Check, Flame, Scissors, ShieldAlert, Zap } from 'lucide-react';
 import { sound } from '../../engine/audio/synth';
 import { Lang, t, UI_COPY } from '../../engine/i18n/text';
 import { runStatements, TraceFrame } from '../../engine/vm';
@@ -18,11 +18,8 @@ import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MemoryHud } from '../MemoryHud';
-import { MiraComms } from '../MiraComms';
-import { MissionHeader } from '../MissionHeader';
+import { MissionStageLayout } from '../MissionStageLayout';
 import { ArchiveCanvas } from '../stages/ArchiveCanvas';
-import { TimelineBar } from '../TimelineBar';
 
 export interface Ch03MissionProps {
   lang: Lang;
@@ -83,8 +80,8 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     mood: 'alert',
     text:
       lang === 'zh-Hant'
-        ? '訊號檔案館字串膠帶損毀！調校雷射切刀精準切出 "RON"，並實測一次「越界錯誤」與「字串不可變性」實驗！'
-        : 'Archive tape corrupted! Calibrate the laser slicer to extract "RON", and test both Out-of-Bounds and Immutability!',
+        ? '通訊膠帶受損！調整雷射起訖點從 "DRONE" 切出 "RON"，再測試一次越界或不可變實驗。'
+        : 'Archive tape corrupted! Calibrate the slicer to extract "RON", then test OOB or immutability.',
   });
 
   useEffect(() => {
@@ -93,32 +90,32 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         mood: progress.reconDone ? 'success' : 'alert',
         text:
           lang === 'zh-Hant'
-            ? '訊號檔案館字串膠帶損毀！調校雷射切刀精準切出 "RON"，並實測越界錯誤或字串不可變性！'
-            : 'Archive tape corrupted! Calibrate the laser slicer to extract "RON", and test Out-of-Bounds or Immutability!',
+            ? '從 "DRONE" 切出 "RON"，並測試一次越界錯誤或字串不可變性按鈕！'
+            : 'Slice "RON" from "DRONE", then run one OOB or Immutability anomaly test!',
       });
     } else if (phase === 'breach') {
       setMira({
         mood: 'neutral',
         text:
           lang === 'zh-Hant'
-            ? '解開三道字串與 Math 檔案鎖！記得 substring 不含 end 索引，且字串不可直接原地修改。'
-            : 'Crack 3 String & Math locks! Remember substring excludes end and Strings are immutable.',
+            ? 'substring(a, b) 不含終點 b，且 String 永遠不可原地改變。解開三道鎖！'
+            : 'substring(a, b) excludes end index b and Strings are immutable. Crack 3 locks!',
       });
     } else if (phase === 'battle') {
       setMira({
         mood: 'alert',
         text:
           lang === 'zh-Hant'
-            ? '先通過 01 INITIALS SLICER，再使用 indexOf("-") 擊破 BOSS: ROUTE EXTRACTOR！'
-            : 'Clear Initials Slicer first, then use indexOf("-") to defeat IMMUTABLE ARCHIVIST!',
+            ? '先過 01 Initials Slicer，再用 indexOf("-") 擊敗 Boss Route Extractor！'
+            : 'Clear Initials Slicer first, then use indexOf("-") to defeat Immutable Archivist!',
       });
     } else {
       setMira({
         mood: 'success',
         text:
           lang === 'zh-Hant'
-            ? 'Act I 全數修復！STRING LASER 晶片已同步至 BYTE。'
-            : 'Act I complete! STRING LASER chip synced to BYTE.',
+            ? 'Act I 全數通關！STRING LASER 晶片已裝備，下一戰進入 Act II！'
+            : 'Act I complete! STRING LASER synced. Ready for Act II!',
       });
     }
   }, [phase, lang, progress.reconDone]);
@@ -180,14 +177,14 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       setSlicedOk(true);
       setReconFeedback(
         lang === 'zh-Hant'
-          ? '切出 "RON"！substring(1, 4) 包含索引 1..3 並排除索引 4。記得也測一下越界或不可變按鈕！'
+          ? '切出 "RON"！substring(1, 4) 取索引 1–3 不含 4。記得也測一次越界或不可變按鈕！'
           : 'Sliced "RON"! substring(1, 4) copies indexes 1–3 and excludes 4.',
       );
       markReconIfReady(true, oobSeen, immutableSeen);
     } else {
       sound.click();
       setReconStatus('idle');
-      setReconFeedback(`s.substring(${beginIdx}, ${endIdx}) → "${out}". Target is "RON"!`);
+      setReconFeedback(`s.substring(${beginIdx}, ${endIdx}) → "${out}". Target is "RON".`);
     }
   };
 
@@ -207,8 +204,8 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       mood: 'danger',
       text:
         lang === 'zh-Hant'
-          ? '警報！end=7 超過字串長度 5，立刻拋出 StringIndexOutOfBoundsException！'
-          : 'Alert! end=7 exceeds length 5, triggering StringIndexOutOfBoundsException!',
+          ? 'end=7 超過長度 5，立刻觸發 StringIndexOutOfBoundsException！'
+          : 'end=7 exceeds length 5, throwing StringIndexOutOfBoundsException!',
     });
   };
 
@@ -224,8 +221,8 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     setSlicedText('s stays "DRONE"');
     setReconFeedback(
       lang === 'zh-Hant'
-        ? 's.substring(0, 3); 沒有存回變數，所以 s 依然是 "DRONE"（String 不可變性）！'
-        : 's.substring(0, 3); discarded its return value, so s remains "DRONE"!',
+        ? 's.substring(0, 3); 沒存回變數，s 依然維持 "DRONE"！'
+        : 's.substring(0, 3); discarded its result, so s remains "DRONE".',
     );
     markReconIfReady(slicedOk, oobSeen, true);
   };
@@ -282,13 +279,13 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         mood: 'success',
         text:
           lang === 'zh-Hant'
-            ? `不變檔案官瓦解！獲得 ${rank} 級評價與 STRING LASER 晶片！`
-            : `IMMUTABLE ARCHIVIST neutralized! Earned ${rank}-Rank and STRING LASER!`,
+            ? `不變檔案官擊破！獲得 ${rank} 級評價與 STRING LASER！`
+            : `IMMUTABLE ARCHIVIST neutralized! Earned ${rank}-Rank and STRING LASER.`,
       });
     } else {
       onUpdateProgress((p) => ({ ...p, encounterCleared: nextCleared }));
       onCutIn({
-        tag: 'ENCOUNTER CLEAR',
+        tag: 'STAGE CLEAR',
         title: encounter === 'initials' ? 'INITIALS SLICER VERIFIED!' : 'ROUTE EXTRACTOR CLEARED!',
         tone: 'cyan',
       });
@@ -311,224 +308,310 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         ? inspectedTrial.label
         : 'west-42';
 
+  const brokenShields =
+    encounter === 'route' && battleResult
+      ? battleResult.totalWaves === 1
+        ? progress.rank ? 3 : 0
+        : battleResult.wavesCleared
+      : encounter === 'route' && progress.rank ? 3 : 0;
+
   return (
-    <div className="mission-shell">
-      <MissionHeader
-        meta={meta}
-        lang={lang}
-        phase={phase}
-        progress={progress}
-        battleComplete={battleComplete}
-        onPhaseChange={onPhaseChange}
-      />
+    <MissionStageLayout
+      stage={
+        <ArchiveCanvas
+          mode={phase === 'recon' ? 'recon' : 'battle'}
+          tapeText={tapeText}
+          beginIdx={beginIdx}
+          endIdx={endIdx}
+          slicedResult={phase === 'recon' ? slicedText : inspectedTrial?.actual ?? ''}
+          activeFrame={currentFrame}
+          bossShields={3}
+          brokenShields={brokenShields}
+          status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
+          pulseKey={pulseKey}
+        />
+      }
+      bossHud={
+        phase === 'battle' && encounter === 'route'
+          ? { name: 'IMMUTABLE ARCHIVIST', shields: 3, broken: brokenShields }
+          : undefined
+      }
+      mira={mira}
+      traceFrames={traceFrames}
+      stepIdx={stepIdx}
+      onStepChange={setStepIdx}
+      autoPlaySeq={autoPlaySeq}
+      stdout={stdoutShown}
+      lang={lang}
+    >
+      {phase === 'recon' && (
+        <div className="deck-stack">
+          <div className="deck-row-between">
+            <h2 className="deck-heading">
+              {lang === 'zh-Hant' ? '從 "DRONE" 切出 "RON"' : 'Slice "RON" from "DRONE"'}
+            </h2>
+            <span className="deck-hint mono">
+              {slicedOk ? '✓ RON' : 'Slice'} · {oobSeen || immutableSeen ? '✓ Bug' : 'Test anomaly'}
+            </span>
+          </div>
 
-      <div className="cockpit-grid">
-        <div className="cockpit-left">
-          <MiraComms mood={mira.mood} message={mira.text} lang={lang} />
-
-          {phase === 'recon' && (
-            <section className="panel-frame chamfer" style={{ padding: 18, display: 'grid', gap: 12 }}>
-              <span className="tac-tag amber">PHASE 01 // OPTICAL STRING SLICER</span>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <label style={{ display: 'grid', gap: 4 }}>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>begin index: {beginIdx}</span>
-                  <input type="range" min={0} max={5} value={beginIdx} onChange={(e) => setBeginIdx(Number(e.target.value))} style={{ accentColor: 'var(--cyan)' }} />
-                </label>
-                <label style={{ display: 'grid', gap: 4 }}>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--amber)' }}>end index: {endIdx}</span>
-                  <input type="range" min={0} max={5} value={endIdx} onChange={(e) => setEndIdx(Number(e.target.value))} style={{ accentColor: 'var(--amber)' }} />
-                </label>
+          <div className="deck-two-col">
+            <label className="control-tile">
+              <div className="deck-row-between">
+                <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>begin</span>
+                <strong className="mono">{beginIdx}</strong>
               </div>
-
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" onClick={handleFireSlice}>
-                  <Scissors size={14} /> {slicedOk ? '✓ ' : ''}FIRE LASER: s.substring({beginIdx}, {endIdx})
-                </button>
-                <button type="button" className="tac-btn crimson chamfer-sm" onClick={handleTestOob}>
-                  <AlertTriangle size={14} /> {oobSeen ? '✓ ' : ''}TEST OOB (1, 7)
-                </button>
-                <button type="button" className="tac-btn ghost chamfer-sm" onClick={handleTestImmutable}>
-                  {immutableSeen ? '✓ ' : ''}TEST IMMUTABLE CALL
-                </button>
+              <input type="range" min={0} max={5} value={beginIdx} onChange={(e) => setBeginIdx(Number(e.target.value))} style={{ accentColor: 'var(--cyan)' }} />
+            </label>
+            <label className="control-tile">
+              <div className="deck-row-between">
+                <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>end</span>
+                <strong className="mono">{endIdx}</strong>
               </div>
+              <input type="range" min={0} max={5} value={endIdx} onChange={(e) => setEndIdx(Number(e.target.value))} style={{ accentColor: 'var(--amber)' }} />
+            </label>
+          </div>
 
-              {reconFeedback && (
-                <div className="mono" style={{ padding: 10, fontSize: 12, background: reconStatus === 'error' ? 'var(--crimson-dim)' : 'var(--lime-dim)', border: `1px solid ${reconStatus === 'error' ? 'var(--crimson)' : 'var(--lime)'}` }}>
-                  {reconFeedback}
-                </div>
-              )}
+          <div className="deck-secondary-row">
+            <button type="button" className="tac-btn ghost compact-btn" onClick={handleTestOob}>
+              <AlertTriangle size={13} />
+              <span>{oobSeen ? '✓ ' : ''}Test OOB (1, 7)</span>
+            </button>
+            <button type="button" className="tac-btn ghost compact-btn" onClick={handleTestImmutable}>
+              <span>{immutableSeen ? '✓ ' : ''}Test Immutable</span>
+            </button>
+          </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="mono" style={{ fontSize: 11, color: 'var(--ink-muted)' }}>
-                  {slicedOk ? '✓ "RON" sliced' : 'Slice "RON"'} · {oobSeen || immutableSeen ? '✓ anomaly tested' : 'Test OOB or Immutable'}
-                </span>
-                <button type="button" className="tac-btn lime chamfer-sm" disabled={!progress.reconDone} onClick={() => { sound.click(); onPhaseChange('breach'); }}>
-                  {lang === 'zh-Hant' ? '前往 Phase 02 檔案鎖' : 'PROCEED TO BREACH'} <ArrowRight size={15} />
-                </button>
-              </div>
-            </section>
+          {reconFeedback && (
+            <div className={`deck-feedback ${reconStatus === 'error' ? 'err' : 'ok'}`}>
+              {reconFeedback}
+            </div>
           )}
 
-          {phase === 'breach' && (
-            <BreachPanel
-              locks={CH03_LOCKS}
-              solvedLocks={solvedLocks}
-              lang={lang}
-              tagLabel="STRING & MATH API"
-              onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
-              onTraceLoaded={(frames) => {
-                setTraceFrames(frames);
-                setStepIdx(0);
-                setAutoPlaySeq((s) => s + 1);
-              }}
-              onSolvedLock={(idx, all) => {
-                const next = [...solvedLocks];
-                next[idx] = true;
-                setSolvedLocks(next);
-                if (all) {
-                  onCutIn({ tag: 'ARCHIVE UNLOCKED', title: 'STRING LOCKS CLEARED', tone: 'lime' });
-                  onUpdateProgress((p) => ({
-                    ...p,
-                    breachCleared: true,
-                    completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
-                  }));
-                }
-              }}
-              onProceedToBattle={() => onPhaseChange('battle')}
-            />
-          )}
+          <div className="deck-actions">
+            <button
+              type="button"
+              className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`}
+              onClick={handleFireSlice}
+            >
+              <Scissors size={14} />
+              <span>{slicedOk ? '✓ ' : ''}FIRE: s.substring({beginIdx}, {endIdx})</span>
+            </button>
 
-          {phase === 'battle' && (
-            <section className="panel-frame chamfer" style={{ padding: 16, display: 'grid', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className={`tac-btn ${encounter === 'initials' ? 'primary' : initialsCleared ? 'lime' : 'ghost'} chamfer-sm`} style={{ minHeight: 34, fontSize: 11 }} onClick={() => { sound.click(); setEncounter('initials'); setBattleResult(null); setChaosNote(null); }}>
-                  {initialsCleared ? '✓ ' : ''}01 INITIALS SLICER
-                </button>
-                <button type="button" className={`tac-btn ${encounter === 'route' ? 'primary' : routeCleared ? 'lime' : 'ghost'} chamfer-sm`} style={{ minHeight: 34, fontSize: 11 }} onClick={() => { sound.click(); setEncounter('route'); setBattleResult(null); setChaosNote(null); }}>
-                  {routeCleared ? '✓ ' : ''}02 BOSS: ROUTE EXTRACTOR
-                </button>
-              </div>
-
-              {encounter === 'route' && (
-                <div className="boss-bar chamfer-sm">
-                  <div>
-                    <div className="mono" style={{ fontSize: 10, color: 'var(--crimson)', fontWeight: 700 }}>SECTOR BOSS // 3-WAVE STRING LASER</div>
-                    <strong style={{ fontSize: 15 }}>IMMUTABLE ARCHIVIST</strong>
-                  </div>
-                  <div className="shield-pips">
-                    {[0, 1, 2].map((i) => (
-                      <div key={i} className={`shield-pip ${battleResult && i < battleResult.wavesCleared ? 'broken' : ''}`} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <CodeTerminal
-                value={encounter === 'initials' ? initialsCode : routeCode}
-                starterCode={encounter === 'initials' ? CH03_INITIALS_STARTER : CH03_ROUTE_STARTER}
-                activeLine={currentFrame?.line ?? null}
-                lang={lang}
-                onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, [encounter]: next } }))}
-              />
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" style={{ minHeight: 42 }} onClick={handleDeployBattle}>
-                  <Zap size={15} />
-                  {t(UI_COPY.runDeploy, lang)}
-                </button>
-                {battleComplete && (
-                  <button type="button" className="tac-btn lime chamfer-sm" onClick={() => { sound.click(); onPhaseChange('debrief'); }}>
-                    {lang === 'zh-Hant' ? '前往 Phase 04 戰報總結' : 'OPEN MISSION DEBRIEF'} →
-                  </button>
-                )}
-              </div>
-
-              {chaosNote && (
-                <div className="tac-tag amber" style={{ justifyContent: 'center', padding: 8 }}>
-                  <Flame size={13} /> {chaosNote}
-                </div>
-              )}
-
-              {battleResult && (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {battleResult.failedTrial?.run.error && (
-                    <div className="mono" style={{ padding: 10, background: 'var(--crimson-dim)', border: '1px solid var(--crimson)', fontSize: 12 }}>
-                      <ShieldAlert size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-                      Line {battleResult.failedTrial.run.error.line}: {battleResult.failedTrial.run.error.message}
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 6 }}>
-                    {battleResult.trials.map((tr, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        className={`tac-btn ${tr.passed ? 'lime' : 'crimson'} chamfer-sm`}
-                        style={{ minHeight: 34, padding: '5px 8px', fontSize: 10.5, justifyContent: 'space-between' }}
-                        onClick={() => {
-                          sound.click();
-                          setInspectedTrial(tr);
-                          setTraceFrames(tr.run.frames);
-                          setStepIdx(0);
-                          setAutoPlaySeq((s) => s + 1);
-                        }}
-                      >
-                        <span>W{tr.waveIndex + 1} · {tr.label}</span>
-                        <span>{tr.passed ? `✓ "${tr.actual}"` : `✕ "${tr.actual}"`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-
-          {phase === 'debrief' && (
-            <section className="panel-frame chamfer" style={{ padding: 20, display: 'grid', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="tac-tag lime">ARCHIVE RESTORED // ACT I COMPLETE</span>
-                <span className="tac-tag cyan" style={{ fontSize: 16, padding: '6px 14px' }}>RANK {progress.rank ?? 'S'}</span>
-              </div>
-              <h2 style={{ fontSize: 28 }}>{lang === 'zh-Hant' ? '訊號檔案館全數復原' : 'Signal Archive Restored'}</h2>
-              <p style={{ color: 'var(--ink-secondary)', fontSize: 13.5 }}>
-                {lang === 'zh-Hant'
-                  ? 'Act I《都市覺醒》全數通關！你已集齊 MEMORY CORE、ALU MODULE 與 STRING LASER 三大基礎晶片。下一站：Act II 第 04 話《哨兵空域閘門》！'
-                  : 'Act I Complete! You unlocked MEMORY CORE, ALU MODULE, and STRING LASER. Ready to launch Act II: Ch.04 Sentinel Sky-Gate!'}
-              </p>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" onClick={() => { sound.deploy(); onOpenChapter(4); }}>
-                  {lang === 'zh-Hant' ? '前往 Act II：Ch.04 哨兵空域閘門' : 'NEXT: CH.04 SENTINEL SKY-GATE'} →
-                </button>
-                <button type="button" className="tac-btn ghost chamfer-sm" onClick={() => { sound.click(); onBackToMap(); }}>
-                  {t(UI_COPY.backToMap, lang)}
-                </button>
-              </div>
-            </section>
-          )}
+            {progress.reconDone && (
+              <button
+                type="button"
+                className="tac-btn primary deck-primary-cta"
+                onClick={() => {
+                  sound.click();
+                  setTraceFrames([]);
+                  onPhaseChange('breach');
+                }}
+              >
+                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
         </div>
+      )}
 
-        <div className="cockpit-right">
-          <ArchiveCanvas
-            mode={phase === 'recon' ? 'recon' : 'battle'}
-            tapeText={tapeText}
-            beginIdx={beginIdx}
-            endIdx={endIdx}
-            slicedResult={phase === 'recon' ? slicedText : inspectedTrial?.actual ?? ''}
-            activeFrame={currentFrame}
-            bossShields={3}
-            brokenShields={
-              encounter === 'route' && battleResult
-                ? battleResult.totalWaves === 1
-                  ? progress.rank ? 3 : 0
-                  : battleResult.wavesCleared
-                : encounter === 'route' && progress.rank ? 3 : 0
+      {phase === 'breach' && (
+        <BreachPanel
+          locks={CH03_LOCKS}
+          solvedLocks={solvedLocks}
+          lang={lang}
+          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onTraceLoaded={(frames) => {
+            setTraceFrames(frames);
+            setStepIdx(0);
+            setAutoPlaySeq((s) => s + 1);
+          }}
+          onSolvedLock={(idx, all) => {
+            const next = [...solvedLocks];
+            next[idx] = true;
+            setSolvedLocks(next);
+            if (all) {
+              onCutIn({ tag: 'ARCHIVE UNLOCKED', title: 'STRING LOCKS CLEARED', tone: 'lime' });
+              onUpdateProgress((p) => ({
+                ...p,
+                breachCleared: true,
+                completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
+              }));
             }
-            status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
-            pulseKey={pulseKey}
+          }}
+          onProceedToBattle={() => {
+            setTraceFrames([]);
+            setBattleResult(null);
+            onPhaseChange('battle');
+          }}
+        />
+      )}
+
+      {phase === 'battle' && (
+        <div className="deck-stack">
+          <div className="encounter-tabs" role="tablist" aria-label="Battle encounters">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={encounter === 'initials'}
+              className={`encounter-tab ${encounter === 'initials' ? 'active' : ''} ${initialsCleared ? 'cleared' : ''}`}
+              onClick={() => {
+                sound.click();
+                setEncounter('initials');
+                setBattleResult(null);
+                setTraceFrames([]);
+                setChaosNote(null);
+              }}
+            >
+              {initialsCleared && <Check size={12} strokeWidth={2.5} />}
+              <span>01 Initials Slicer</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={encounter === 'route'}
+              className={`encounter-tab ${encounter === 'route' ? 'active' : ''} ${routeCleared ? 'cleared' : ''}`}
+              onClick={() => {
+                sound.click();
+                setEncounter('route');
+                setBattleResult(null);
+                setTraceFrames([]);
+                setChaosNote(null);
+              }}
+            >
+              {routeCleared && <Check size={12} strokeWidth={2.5} />}
+              <span>02 Route Extractor</span>
+            </button>
+          </div>
+
+          <p className="mission-goal">
+            {encounter === 'initials'
+              ? lang === 'zh-Hant'
+                ? '回傳兩個名字的首字母縮寫 (例："Mira" 與 "Byte" → "MB")。'
+                : 'Return the uppercase/first-letter initials of both names (e.g., "Mira", "Byte" → "MB").'
+              : lang === 'zh-Hant'
+                ? '使用 indexOf("-") 與 substring(...) 抽出 "-" 後方的路線代碼；無 "-" 時回傳 ""。'
+                : 'Use indexOf("-") and substring(...) to return everything after "-"; return "" if missing.'}
+          </p>
+
+          <CodeTerminal
+            value={encounter === 'initials' ? initialsCode : routeCode}
+            starterCode={encounter === 'initials' ? CH03_INITIALS_STARTER : CH03_ROUTE_STARTER}
+            activeLine={currentFrame?.line ?? null}
+            lang={lang}
+            onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, [encounter]: next } }))}
           />
-          <TimelineBar frames={traceFrames} stepIndex={stepIdx} onStepChange={setStepIdx} lang={lang} autoPlayTrigger={autoPlaySeq} />
-          <MemoryHud frame={currentFrame} stdout={stdoutShown} lang={lang} />
+
+          <div className="deck-actions">
+            <button
+              type="button"
+              className="tac-btn primary deck-primary-cta"
+              onClick={handleDeployBattle}
+            >
+              <Zap size={15} />
+              <span>{t(UI_COPY.runDeploy, lang)}</span>
+            </button>
+
+            {battleComplete && (
+              <button
+                type="button"
+                className="tac-btn lime deck-primary-cta"
+                onClick={() => {
+                  sound.click();
+                  onPhaseChange('debrief');
+                }}
+              >
+                <span>{lang === 'zh-Hant' ? '查看破關結算' : 'OPEN DEBRIEF'}</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
+
+          {chaosNote && (
+            <div className="deck-feedback warn">
+              <Flame size={13} /> <span>{chaosNote}</span>
+            </div>
+          )}
+
+          {battleResult && (
+            <div className="wave-results">
+              {battleResult.failedTrial?.run.error && (
+                <div className="wave-err-line mono" style={{ marginBottom: 6 }}>
+                  <ShieldAlert size={12} />
+                  <span>Line {battleResult.failedTrial.run.error.line}: {battleResult.failedTrial.run.error.message}</span>
+                </div>
+              )}
+              <div className="wave-pills">
+                {battleResult.trials.map((tr, i) => {
+                  const isSel = inspectedTrial === tr;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`wave-pill mono ${tr.passed ? 'pass' : 'fail'} ${isSel ? 'selected' : ''}`}
+                      onClick={() => {
+                        sound.click();
+                        setInspectedTrial(tr);
+                        setTraceFrames(tr.run.frames);
+                        setStepIdx(0);
+                        setAutoPlaySeq((s) => s + 1);
+                      }}
+                    >
+                      <span>W{tr.waveIndex + 1} · {tr.label}</span>
+                      <span>{tr.passed ? `✓ "${tr.actual}"` : `✕ "${tr.actual}"`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+
+      {phase === 'debrief' && (
+        <div className="debrief-card">
+          <div className="debrief-rank-row">
+            <div className="debrief-rank">{progress.rank ?? 'S'}</div>
+            <div>
+              <div className="debrief-chip mono">{meta.chipName} SYNCED</div>
+              <h2 className="deck-heading" style={{ marginTop: 4 }}>
+                {lang === 'zh-Hant' ? '訊號檔案館全數復原' : 'Signal Archive Restored'}
+              </h2>
+            </div>
+          </div>
+
+          <p className="deck-copy">
+            {lang === 'zh-Hant'
+              ? 'Act I 全數完成！你已掌握 String 不可變性與 indexOf/substring 切片。'
+              : 'Act I complete! You mastered String immutability and indexOf/substring slicing.'}
+          </p>
+
+          <div className="deck-actions">
+            <button
+              type="button"
+              className="tac-btn primary deck-primary-cta"
+              onClick={() => {
+                sound.deploy();
+                onOpenChapter(4);
+              }}
+            >
+              <span>{lang === 'zh-Hant' ? '下一章 Act II：Ch.04 空域閘門' : 'NEXT: CH.04 SKY-GATE'}</span>
+              <ArrowRight size={15} />
+            </button>
+            <button
+              type="button"
+              className="tac-btn ghost"
+              onClick={() => {
+                sound.click();
+                onBackToMap();
+              }}
+            >
+              {t(UI_COPY.backToMap, lang)}
+            </button>
+          </div>
+        </div>
+      )}
+    </MissionStageLayout>
   );
 };

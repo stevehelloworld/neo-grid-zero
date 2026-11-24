@@ -48,7 +48,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '在獨立暫存器儲存基本型別與字串。指定運算子 = 會立即計算右側並存入左側，不會自動連動更新。',
     },
     bossName: { en: 'OVERLOAD CORE', zh: '過載反應爐' },
-    mapPos: { x: 50, y: 39 },
+    mapPos: { x: 50, y: 34 },
     playable: true,
   },
   {
@@ -69,7 +69,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '解鎖精準浮點轉型除法與複合指定管線。',
     },
     bossName: { en: 'TRUNCATION TITAN', zh: '截斷泰坦' },
-    mapPos: { x: 34, y: 74 },
+    mapPos: { x: 32, y: 60 },
     playable: true,
   },
   {
@@ -90,7 +90,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '零起始索引的精準字串雷射切割器與亂數範圍調校模組。',
     },
     bossName: { en: 'IMMUTABLE ARCHIVIST', zh: '不變檔案官' },
-    mapPos: { x: 25, y: 44 },
+    mapPos: { x: 24, y: 40 },
     playable: true,
   },
   {
@@ -111,7 +111,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '高速三航道邏輯路由器，具備短路保護與笛摩根定律等價判定能力。',
     },
     bossName: { en: 'SENTINEL GATEKEEPER', zh: '哨兵閘門王' },
-    mapPos: { x: 82, y: 49 },
+    mapPos: { x: 80, y: 46 },
     playable: true,
   },
   {
@@ -132,7 +132,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '具備終止條件防護的持續循環推進器。',
     },
     bossName: { en: 'INFINITE COIL', zh: '無窮電圈' },
-    mapPos: { x: 64, y: 52 },
+    mapPos: { x: 65, y: 48 },
     playable: true,
   },
   {
@@ -153,7 +153,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '雙暫存器串流分析核心，擅長區間極值與位數拆解。',
     },
     bossName: { en: 'NOISE PHANTOM', zh: '雜訊幻影' },
-    mapPos: { x: 38, y: 57 },
+    mapPos: { x: 40, y: 51 },
     playable: true,
   },
   {
@@ -174,7 +174,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '外層與內層邊界聯動的多維度雷達掃描發射器。',
     },
     bossName: { en: 'QUADRATIC HYDRA', zh: '平方九頭蛇' },
-    mapPos: { x: 56, y: 63 },
+    mapPos: { x: 56, y: 58 },
     playable: true,
   },
   {
@@ -195,7 +195,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '可實例化獨立物件機體，確保內部狀態不變量不受外界破壞。',
     },
     bossName: { en: 'LEAKED CHASSIS', zh: '外洩裝甲' },
-    mapPos: { x: 66, y: 28 },
+    mapPos: { x: 66, y: 26 },
     playable: false,
   },
   {
@@ -216,7 +216,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '物件間純查詢通訊匯流排，可即時標記參照別名連線。',
     },
     bossName: { en: 'MIRROR SPECTER', zh: '鏡像幽靈' },
-    mapPos: { x: 75, y: 31 },
+    mapPos: { x: 76, y: 29 },
     playable: false,
   },
   {
@@ -237,7 +237,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '高完整性固定長度序列緩衝區掃描器。',
     },
     bossName: { en: 'DERAILED SENTINEL', zh: '出軌哨兵' },
-    mapPos: { x: 26, y: 56 },
+    mapPos: { x: 18, y: 52 },
     playable: false,
   },
   {
@@ -258,7 +258,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '彈性動態清單模組，搭載反向走訪防跳格穩定器。',
     },
     bossName: { en: 'SHIFT HYDRA', zh: '位移九頭蛇' },
-    mapPos: { x: 46, y: 67 },
+    mapPos: { x: 45, y: 60 },
     playable: false,
   },
   {
@@ -279,7 +279,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '支援逐列與逐欄走訪的二維矩陣探測車。',
     },
     bossName: { en: 'MATRIX GOLEM', zh: '矩陣魔像' },
-    mapPos: { x: 65, y: 64 },
+    mapPos: { x: 68, y: 60 },
     playable: false,
   },
   {
@@ -300,7 +300,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '對數級二分搜尋引擎與全息遞迴堆疊解析核心。',
     },
     bossName: { en: 'STACK PHANTOM', zh: '堆疊幻影' },
-    mapPos: { x: 70, y: 44 },
+    mapPos: { x: 70, y: 38 },
     playable: false,
   },
   {
@@ -321,7 +321,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '對齊 AP CSA 官方四大 FRQ 評分規準的多模組串接協定。',
     },
     bossName: { en: 'AETHER STORM', zh: '以太風暴' },
-    mapPos: { x: 20, y: 66 },
+    mapPos: { x: 18, y: 61 },
     playable: false,
   },
   {
@@ -342,7 +342,7 @@ export const CAMPAIGN_CHAPTERS: ChapterMeta[] = [
       zh: '涵蓋全課程 1–4 單元的最終模擬檢定護盾。',
     },
     bossName: { en: 'NULL-SPECTER', zh: 'NULL-SPECTER' },
-    mapPos: { x: 50, y: 24 },
+    mapPos: { x: 50, y: 20 },
     playable: false,
   },
 ];

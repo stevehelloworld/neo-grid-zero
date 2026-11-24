@@ -109,10 +109,20 @@ export const App: React.FC = () => {
     });
   };
 
+  const activeProgress =
+    activeChapterId !== null ? getChapterProgress(state, activeChapterId) : null;
+  const activeBattleComplete = activeProgress
+    ? Boolean(activeProgress.rank || activeProgress.completedPhases.includes('battle'))
+    : false;
+
   return (
     <div className="app-shell">
       <TopBar
         activeChapterId={activeChapterId}
+        activePhase={activePhase}
+        activeProgress={activeProgress}
+        battleComplete={activeBattleComplete}
+        onPhaseChange={handlePhaseChange}
         lang={state.lang}
         onToggleLang={() =>
           setState((p) => ({ ...p, lang: p.lang === 'en' ? 'zh-Hant' : 'en' }))

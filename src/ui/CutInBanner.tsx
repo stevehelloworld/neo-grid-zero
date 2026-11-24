@@ -15,14 +15,12 @@ export interface CutInBannerProps {
 export const CutInBanner: React.FC<CutInBannerProps> = ({ cutIn, onDone }) => {
   useEffect(() => {
     if (!cutIn) return;
-    const timer = window.setTimeout(onDone, 1250);
+    const timer = window.setTimeout(onDone, 900);
     return () => window.clearTimeout(timer);
   }, [cutIn, onDone]);
 
   if (!cutIn) return null;
 
-  const stripeClass =
-    cutIn.tone === 'danger' ? 'hazard-stripe-crimson' : 'hazard-stripe';
   const color =
     cutIn.tone === 'danger'
       ? 'var(--crimson)'
@@ -33,8 +31,16 @@ export const CutInBanner: React.FC<CutInBannerProps> = ({ cutIn, onDone }) => {
           : 'var(--cyan)';
 
   return (
-    <div className="cutin-overlay" role="status" aria-live="polite">
-      <div className={`cutin-band ${cutIn.tone} ${stripeClass}`}>
+    <div
+      className="cutin-overlay"
+      role="status"
+      aria-live="polite"
+      style={{ pointerEvents: 'none' }}
+    >
+      <div
+        className={`cutin-band ${cutIn.tone}`}
+        style={{ pointerEvents: 'none' }}
+      >
         <span className={`tac-tag ${cutIn.tone === 'danger' ? 'crimson' : cutIn.tone}`}>
           {cutIn.tag}
         </span>

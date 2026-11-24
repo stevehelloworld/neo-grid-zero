@@ -19,11 +19,8 @@ import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MemoryHud } from '../MemoryHud';
-import { MiraComms } from '../MiraComms';
-import { MissionHeader } from '../MissionHeader';
+import { MissionStageLayout } from '../MissionStageLayout';
 import { LoopTowerCanvas } from '../stages/LoopTowerCanvas';
-import { TimelineBar } from '../TimelineBar';
 
 export interface Ch05MissionProps {
   lang: Lang;
@@ -79,13 +76,41 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
     mood: 'alert',
     text:
       lang === 'zh-Hant'
-        ? '蓄電高塔出現異常迴圈熔斷！先按「TEST CORRUPTED LOOP」看無限負向充電如何燒毀保險絲，再手動脈衝充電到目標 14！'
-        : 'Surge Tower tripped a breaker! Test the Corrupted Loop first, then pulse-charge from 3 by +4 until reaching target 14!',
+        ? '蓄電高塔迴圈熔斷！先點「測無窮迴圈」目擊負向充電，再按 PULSE (+4) 充至 14。'
+        : 'Surge Tower tripped a breaker! Test the infinite loop first, then pulse-charge from 3 to 14.',
   });
 
   useEffect(() => {
     return () => timersRef.current.forEach((id) => window.clearTimeout(id));
   }, []);
+
+  useEffect(() => {
+    if (phase === 'breach') {
+      setMira({
+        mood: 'neutral',
+        text:
+          lang === 'zh-Hant'
+            ? '注意 while 進入條件與邊界終止時機，解開三道電塔鎖！'
+            : 'Watch entry guards and boundary termination across all 3 iteration locks!',
+      });
+    } else if (phase === 'battle') {
+      setMira({
+        mood: 'alert',
+        text:
+          lang === 'zh-Hant'
+            ? '實作 rounds(start, gain, target)：累積加 gain 到達或超過 target，若一開始已達標回傳 0。'
+            : 'Implement rounds(start, gain, target): return rounds needed to reach target (0 if start >= target).',
+      });
+    } else if (phase === 'debrief') {
+      setMira({
+        mood: 'success',
+        text:
+          lang === 'zh-Hant'
+            ? '蓄電高塔迴圈穩定！下一站進入 Ch.06 脈衝掃描站。'
+            : 'Surge Tower stabilized! Advance to Ch.06 Pulse Scanner.',
+      });
+    }
+  }, [phase, lang]);
 
   useEffect(() => {
     if (!chaosChargeTrigger) return;
@@ -131,8 +156,8 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
       mood: 'danger',
       text:
         lang === 'zh-Hant'
-          ? '抓到了！charge -= 3 讓電量一路掉成負數，永遠小於 12，所以觸發安全熔斷！現在手動脈衝充能試試看！'
-          : 'Caught it! charge -= 3 drives charge negative forever, tripping the infinite-loop breaker! Now manually pulse-charge to 14!',
+          ? 'charge -= 3 讓數值一路變負、永遠 < 12 觸發熔斷！現在手動 PULSE 充到 14。'
+          : 'charge -= 3 drives charge negative forever, tripping the breaker! Now pulse-charge to 14.',
     });
     if (chargeVal >= 14) {
       onUpdateProgress((p) => ({
@@ -157,8 +182,8 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
         mood: 'success',
         text:
           lang === 'zh-Hant'
-            ? `第 ${nextRound} 輪充到 ${nextCharge}（超過 14），while (charge < 14) 在此變成 false 結束！`
-            : `Round ${nextRound} reached ${nextCharge} (>= 14), so while (charge < 14) turns false and stops!`,
+            ? `第 ${nextRound} 輪充到 ${nextCharge} (≥ 14)，while 條件變成 false 結束！`
+            : `Round ${nextRound} hit ${nextCharge} (>= 14), so while (charge < 14) becomes false and stops!`,
       });
       if (infiniteSeen) {
         onUpdateProgress((p) => ({
@@ -218,8 +243,8 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
           mood: 'success',
           text:
             lang === 'zh-Hant'
-              ? `蓄電高塔 9 輪測試全通！解鎖 LOOP THRUSTER 晶片並獲得 ${rank} 級評價！`
-              : `All 9 charge trials stabilized! Earned ${rank}-Rank and unlocked LOOP THRUSTER!`,
+              ? `9 輪測試全通！解鎖 LOOP THRUSTER 並獲得 ${rank} 級評價！`
+              : `All 9 charge trials stabilized! Earned ${rank}-Rank and LOOP THRUSTER.`,
         });
       } else {
         onUpdateProgress((p) => ({ ...p, battleMistakes: p.battleMistakes + 1 }));
@@ -242,216 +267,227 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
     [currentFrame, inspectedTrial],
   );
 
+  const brokenShields = battleResult
+    ? battleResult.totalWaves === 1
+      ? progress.rank ? 3 : 0
+      : battleResult.wavesCleared
+    : progress.rank ? 3 : 0;
+
   return (
-    <div className="mission-shell">
-      <MissionHeader
-        meta={meta}
-        lang={lang}
-        phase={phase}
-        progress={progress}
-        battleComplete={battleComplete}
-        onPhaseChange={onPhaseChange}
-      />
+    <MissionStageLayout
+      stage={
+        <LoopTowerCanvas
+          mode={phase === 'recon' ? 'recon' : 'battle'}
+          chargeValue={phase === 'recon' ? chargeVal : inspectedTrial?.spec.start ?? 3}
+          targetValue={phase === 'recon' ? 14 : inspectedTrial?.spec.target ?? 15}
+          roundCount={phase === 'recon' ? roundVal : inspectedTrial?.actual ?? 0}
+          activeFrame={currentFrame}
+          bossShields={3}
+          brokenShields={brokenShields}
+          status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
+          pulseKey={pulseKey}
+        />
+      }
+      bossHud={
+        phase === 'battle'
+          ? { name: 'INFINITE COIL', shields: 3, broken: brokenShields }
+          : undefined
+      }
+      mira={mira}
+      traceFrames={traceFrames}
+      stepIdx={stepIdx}
+      onStepChange={setStepIdx}
+      autoPlaySeq={autoPlaySeq}
+      stdout={stdoutShown}
+      lang={lang}
+    >
+      {phase === 'recon' && (
+        <div className="deck-stack">
+          <div className="deck-row-between">
+            <h2 className="deck-heading">
+              {lang === 'zh-Hant' ? '脈衝蓄能與無窮迴圈熔斷' : 'Pulse Charge & Breaker Lab'}
+            </h2>
+            <button type="button" className="tac-btn ghost compact-btn" onClick={handleTestInfinite}>
+              <AlertTriangle size={13} />
+              <span>{infiniteSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '測無窮迴圈' : 'Test Loop Bug'}</span>
+            </button>
+          </div>
 
-      <div className="cockpit-grid">
-        <div className="cockpit-left">
-          <MiraComms mood={mira.mood} message={mira.text} lang={lang} />
-
-          {phase === 'recon' && (
-            <section className="panel-frame chamfer" style={{ padding: 18, display: 'grid', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                <span className="tac-tag amber">PHASE 01 // CAPACITOR RIG</span>
-                <button type="button" className="tac-btn crimson chamfer-sm" style={{ minHeight: 34, fontSize: 11 }} onClick={handleTestInfinite}>
-                  <AlertTriangle size={13} /> {infiniteSeen ? '✓ ' : ''}TEST CORRUPTED LOOP
-                </button>
-              </div>
-
-              <div className="panel-frame" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <div>
-                  <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>START: 3 · GAIN: +4 · TARGET: 14</div>
-                  <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
-                    charge = {chargeVal} · rounds = {roundVal}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" className="tac-btn primary chamfer-sm" onClick={handlePulse}>
-                    <Zap size={14} /> PULSE (+4)
-                  </button>
-                  <button
-                    type="button"
-                    className="tac-btn ghost chamfer-sm"
-                    onClick={() => { setChargeVal(3); setRoundVal(0); setReconStatus('idle'); }}
-                  >
-                    RESET
-                  </button>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="mono" style={{ fontSize: 11, color: 'var(--ink-muted)' }}>
-                  {infiniteSeen ? '✓ Fuse break seen' : 'Test infinite loop'} · {chargeVal >= 14 ? '✓ Target reached' : 'Pulse to >= 14'}
-                </span>
-                <button type="button" className="tac-btn lime chamfer-sm" disabled={!progress.reconDone} onClick={() => { sound.click(); onPhaseChange('breach'); }}>
-                  {lang === 'zh-Hant' ? '前往 Phase 02 電塔鎖' : 'PROCEED TO BREACH'} <ArrowRight size={15} />
-                </button>
-              </div>
-            </section>
-          )}
-
-          {phase === 'breach' && (
-            <BreachPanel
-              locks={CH05_LOCKS}
-              solvedLocks={solvedLocks}
-              lang={lang}
-              tagLabel="ITERATION LOGIC"
-              onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
-              onTraceLoaded={(frames) => {
-                setTraceFrames(frames);
-                setStepIdx(0);
-                setAutoPlaySeq((s) => s + 1);
-              }}
-              onSolvedLock={(idx, all) => {
-                const next = [...solvedLocks];
-                next[idx] = true;
-                setSolvedLocks(next);
-                if (all) {
-                  onCutIn({ tag: 'COIL UNLOCKED', title: 'LOOP LOCKS CLEARED', tone: 'lime' });
-                  onUpdateProgress((p) => ({
-                    ...p,
-                    breachCleared: true,
-                    completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
-                  }));
-                }
-              }}
-              onProceedToBattle={() => onPhaseChange('battle')}
-            />
-          )}
-
-          {phase === 'battle' && (
-            <section className="panel-frame chamfer" style={{ padding: 16, display: 'grid', gap: 12 }}>
-              <div className="boss-bar chamfer-sm">
-                <div>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--crimson)', fontWeight: 700 }}>SECTOR BOSS // 3-WAVE CHARGE TRIALS (9 RUNS)</div>
-                  <strong style={{ fontSize: 15 }}>INFINITE COIL</strong>
-                </div>
-                <div className="shield-pips">
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} className={`shield-pip ${battleResult && i < battleResult.wavesCleared ? 'broken' : ''}`} />
-                  ))}
+          <div className="control-tile">
+            <div className="deck-row-between">
+              <div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>START 3 · GAIN +4 · TARGET 14</div>
+                <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
+                  charge = {chargeVal} · rounds = {roundVal}
                 </div>
               </div>
+              <button
+                type="button"
+                className="tac-btn ghost compact-btn"
+                onClick={() => {
+                  setChargeVal(3);
+                  setRoundVal(0);
+                  setReconStatus('idle');
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          </div>
 
-              <div style={{ padding: '10px 12px', background: 'rgba(6, 11, 18, 0.72)', borderLeft: '3px solid var(--cyan)', fontSize: 12.5, color: 'var(--ink-secondary)' }}>
-                {lang === 'zh-Hant'
-                  ? '實作 rounds(start, gain, target)：每輪增加 gain，回傳電量達到或超過 target 的輪數。若起點已 >= target 回傳 0。'
-                  : 'Implement rounds(start, gain, target): return how many rounds adding gain each time are needed to reach or exceed target (0 if start >= target).'}
-              </div>
+          <div className="deck-row-between">
+            <span className="deck-hint mono">
+              {infiniteSeen ? '✓ Breaker seen' : 'Test loop bug'} · {chargeVal >= 14 ? '✓ Target reached' : 'Pulse to >= 14'}
+            </span>
+          </div>
 
-              <CodeTerminal
-                value={code}
-                starterCode={CH05_STARTER_CODE}
-                activeLine={currentFrame?.line ?? null}
-                lang={lang}
-                onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, surge: next } }))}
-              />
+          <div className="deck-actions">
+            <button type="button" className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`} onClick={handlePulse}>
+              <Zap size={15} />
+              <span>PULSE (+4)</span>
+            </button>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" style={{ minHeight: 42 }} onClick={handleDeploySurge}>
-                  <Zap size={15} />
-                  {t(UI_COPY.runDeploy, lang)}
-                </button>
-                {battleComplete && (
-                  <button type="button" className="tac-btn lime chamfer-sm" onClick={() => { sound.click(); onPhaseChange('debrief'); }}>
-                    {lang === 'zh-Hant' ? '前往 Phase 04 戰報總結' : 'OPEN MISSION DEBRIEF'} →
-                  </button>
-                )}
-              </div>
-
-              {chaosNote && (
-                <div className="tac-tag amber" style={{ justifyContent: 'center', padding: 8 }}>
-                  <Flame size={13} /> {chaosNote}
-                </div>
-              )}
-
-              {battleResult && (
-                <div style={{ display: 'grid', gap: 6 }}>
-                  {battleResult.failedTrial?.run.error && (
-                    <div className="mono" style={{ padding: 10, background: 'var(--crimson-dim)', border: '1px solid var(--crimson)', fontSize: 12 }}>
-                      <ShieldAlert size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-                      Line {battleResult.failedTrial.run.error.line}: {battleResult.failedTrial.run.error.message}
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 6 }}>
-                    {battleResult.trials.map((tr) => (
-                      <button
-                        key={tr.spec.id}
-                        type="button"
-                        className={`tac-btn ${tr.passed ? 'lime' : 'crimson'} chamfer-sm`}
-                        style={{ minHeight: 34, padding: '5px 8px', fontSize: 10.5, justifyContent: 'space-between' }}
-                        onClick={() => {
-                          sound.click();
-                          setInspectedTrial(tr);
-                          setTraceFrames(tr.run.frames);
-                          setStepIdx(0);
-                          setAutoPlaySeq((s) => s + 1);
-                        }}
-                      >
-                        <span>W{tr.waveIndex + 1} · ({tr.spec.start},+{tr.spec.gain}→{tr.spec.target})</span>
-                        <span>{tr.passed ? `✓ ${tr.actual}` : `✕ ${tr.actual ?? 'ERR'}/${tr.spec.expected}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </section>
-          )}
-
-          {phase === 'debrief' && (
-            <section className="panel-frame chamfer" style={{ padding: 20, display: 'grid', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="tac-tag lime">SURGE TOWER ONLINE // LOOP THRUSTER SYNCED</span>
-                <span className="tac-tag cyan" style={{ fontSize: 16, padding: '6px 14px' }}>RANK {progress.rank ?? 'S'}</span>
-              </div>
-              <h2 style={{ fontSize: 28 }}>{lang === 'zh-Hant' ? '蓄電高塔迴圈穩定' : 'Surge Tower Stabilized'}</h2>
-              <p style={{ color: 'var(--ink-secondary)', fontSize: 13.5 }}>
-                {lang === 'zh-Hant'
-                  ? '你成功排除無窮迴圈並精準處理了超越目標與零輪邊界！下一關：第 06 話《脈衝掃描站》。'
-                  : 'You defeated INFINITE COIL across overshoot and zero-round edge cases! Advance to Ch.06 Pulse Scanner.'}
-              </p>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <button type="button" className="tac-btn primary chamfer-sm" onClick={() => { sound.deploy(); onOpenChapter(6); }}>
-                  {lang === 'zh-Hant' ? '下一關：Ch.06 脈衝掃描站' : 'NEXT MISSION: CH.06 PULSE SCANNER'} →
-                </button>
-                <button type="button" className="tac-btn ghost chamfer-sm" onClick={() => { sound.click(); onBackToMap(); }}>
-                  {t(UI_COPY.backToMap, lang)}
-                </button>
-              </div>
-            </section>
-          )}
+            {progress.reconDone && (
+              <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.click(); setTraceFrames([]); onPhaseChange('breach'); }}>
+                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
         </div>
+      )}
 
-        <div className="cockpit-right">
-          <LoopTowerCanvas
-            mode={phase === 'recon' ? 'recon' : 'battle'}
-            chargeValue={phase === 'recon' ? chargeVal : inspectedTrial?.spec.start ?? 3}
-            targetValue={phase === 'recon' ? 14 : inspectedTrial?.spec.target ?? 15}
-            roundCount={phase === 'recon' ? roundVal : inspectedTrial?.actual ?? 0}
-            activeFrame={currentFrame}
-            bossShields={3}
-            brokenShields={
-              battleResult
-                ? battleResult.totalWaves === 1
-                  ? progress.rank ? 3 : 0
-                  : battleResult.wavesCleared
-                : progress.rank ? 3 : 0
+      {phase === 'breach' && (
+        <BreachPanel
+          locks={CH05_LOCKS}
+          solvedLocks={solvedLocks}
+          lang={lang}
+          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onTraceLoaded={(frames) => {
+            setTraceFrames(frames);
+            setStepIdx(0);
+            setAutoPlaySeq((s) => s + 1);
+          }}
+          onSolvedLock={(idx, all) => {
+            const next = [...solvedLocks];
+            next[idx] = true;
+            setSolvedLocks(next);
+            if (all) {
+              onCutIn({ tag: 'COIL UNLOCKED', title: 'LOOP LOCKS CLEARED', tone: 'lime' });
+              onUpdateProgress((p) => ({
+                ...p,
+                breachCleared: true,
+                completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
+              }));
             }
-            status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
-            pulseKey={pulseKey}
+          }}
+          onProceedToBattle={() => {
+            setTraceFrames([]);
+            setBattleResult(null);
+            onPhaseChange('battle');
+          }}
+        />
+      )}
+
+      {phase === 'battle' && (
+        <div className="deck-stack">
+          <p className="mission-goal">
+            {lang === 'zh-Hant'
+              ? '實作 rounds(start, gain, target)：每輪加上 gain，回傳電量達到或超過 target 所需輪數（start >= target 時回傳 0）。'
+              : 'Implement rounds(start, gain, target): return rounds needed adding gain each step to reach or exceed target (0 if start >= target).'}
+          </p>
+
+          <CodeTerminal
+            value={code}
+            starterCode={CH05_STARTER_CODE}
+            activeLine={currentFrame?.line ?? null}
+            lang={lang}
+            onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, surge: next } }))}
           />
-          <TimelineBar frames={traceFrames} stepIndex={stepIdx} onStepChange={setStepIdx} lang={lang} autoPlayTrigger={autoPlaySeq} />
-          <MemoryHud frame={currentFrame} stdout={stdoutShown} lang={lang} />
+
+          <div className="deck-actions">
+            <button type="button" className="tac-btn primary deck-primary-cta" onClick={handleDeploySurge}>
+              <Zap size={15} />
+              <span>{t(UI_COPY.runDeploy, lang)}</span>
+            </button>
+            {battleComplete && (
+              <button type="button" className="tac-btn lime deck-primary-cta" onClick={() => { sound.click(); onPhaseChange('debrief'); }}>
+                <span>{lang === 'zh-Hant' ? '查看破關結算' : 'OPEN DEBRIEF'}</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
+
+          {chaosNote && (
+            <div className="deck-feedback warn">
+              <Flame size={13} /> <span>{chaosNote}</span>
+            </div>
+          )}
+
+          {battleResult && (
+            <div className="wave-results">
+              {battleResult.failedTrial?.run.error && (
+                <div className="wave-err-line mono" style={{ marginBottom: 6 }}>
+                  <ShieldAlert size={12} />
+                  <span>Line {battleResult.failedTrial.run.error.line}: {battleResult.failedTrial.run.error.message}</span>
+                </div>
+              )}
+              <div className="wave-pills">
+                {battleResult.trials.map((tr) => {
+                  const isSel = inspectedTrial?.spec.id === tr.spec.id;
+                  return (
+                    <button
+                      key={tr.spec.id}
+                      type="button"
+                      className={`wave-pill mono ${tr.passed ? 'pass' : 'fail'} ${isSel ? 'selected' : ''}`}
+                      onClick={() => {
+                        sound.click();
+                        setInspectedTrial(tr);
+                        setTraceFrames(tr.run.frames);
+                        setStepIdx(0);
+                        setAutoPlaySeq((s) => s + 1);
+                      }}
+                    >
+                      <span>W{tr.waveIndex + 1} · ({tr.spec.start},+{tr.spec.gain}→{tr.spec.target})</span>
+                      <span>{tr.passed ? `✓ ${tr.actual}` : `✕ ${tr.actual ?? 'ERR'}/${tr.spec.expected}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+
+      {phase === 'debrief' && (
+        <div className="debrief-card">
+          <div className="debrief-rank-row">
+            <div className="debrief-rank">{progress.rank ?? 'S'}</div>
+            <div>
+              <div className="debrief-chip mono">{meta.chipName} SYNCED</div>
+              <h2 className="deck-heading" style={{ marginTop: 4 }}>
+                {lang === 'zh-Hant' ? '蓄電高塔迴圈穩定' : 'Surge Tower Stabilized'}
+              </h2>
+            </div>
+          </div>
+
+          <p className="deck-copy">
+            {lang === 'zh-Hant'
+              ? '你排除無窮迴圈並精準掌握 while/for 邊界！下一關：第 06 話脈衝掃描站。'
+              : 'You defeated INFINITE COIL across overshoot and zero-round cases!'}
+          </p>
+
+          <div className="deck-actions">
+            <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.deploy(); onOpenChapter(6); }}>
+              <span>{lang === 'zh-Hant' ? '下一關：Ch.06 脈衝掃描' : 'NEXT: CH.06 SCANNER'}</span>
+              <ArrowRight size={15} />
+            </button>
+            <button type="button" className="tac-btn ghost" onClick={() => { sound.click(); onBackToMap(); }}>
+              {t(UI_COPY.backToMap, lang)}
+            </button>
+          </div>
+        </div>
+      )}
+    </MissionStageLayout>
   );
 };

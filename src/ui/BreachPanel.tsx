@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ArrowRight, Check } from 'lucide-react';
 import { sound } from '../engine/audio/synth';
 import { Lang, t } from '../engine/i18n/text';
 import { runStatements, TraceFrame } from '../engine/vm';
@@ -20,8 +21,7 @@ export const BreachPanel: React.FC<BreachPanelProps> = ({
   locks,
   solvedLocks,
   lang,
-  tagLabel = 'FIREWALL TRACE',
-  proceedLabel = { en: 'ENGAGE BOSS BATTLE', zh: '進入 Phase 03 Boss 戰' },
+  proceedLabel = { en: 'START BOSS BATTLE', zh: '迎戰關卡 Boss' },
   onSolvedLock,
   onMistake,
   onTraceLoaded,
@@ -33,6 +33,7 @@ export const BreachPanel: React.FC<BreachPanelProps> = ({
 
   const lock = locks[lockIdx];
   const allCleared = solvedLocks.every(Boolean);
+  const currentSolved = solvedLocks[lockIdx];
 
   const handleCrack = () => {
     if (selectedOpt === null || !lock) return;
@@ -43,8 +44,8 @@ export const BreachPanel: React.FC<BreachPanelProps> = ({
         ok: false,
         text:
           lang === 'zh-Hant'
-            ? '訊號鎖定失敗！再逐行追蹤一次變數、型別或條件結果。'
-            : 'Signal mismatch! Trace each statement, type conversion, or branch condition once more.',
+            ? '再逐行追蹤一次變數、型別或條件分支。'
+            : 'Trace each statement, type conversion, or branch once more.',
       });
       return;
     }
@@ -61,16 +62,21 @@ export const BreachPanel: React.FC<BreachPanelProps> = ({
     onSolvedLock(lockIdx, nextCleared);
   };
 
+  const nextUnsolvedIdx = solvedLocks.findIndex((solved, idx) => idx !== lockIdx && !solved);
+
   return (
-    <section className="panel-frame chamfer" style={{ padding: 18, display: 'grid', gap: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {locks.map((lk, idx) => (
+    <div className="deck-stack">
+      <div className="breach-steps" role="tablist" aria-label="Security locks">
+        {locks.map((lk, idx) => {
+          const solved = solvedLocks[idx];
+          const active = idx === lockIdx;
+          return (
             <button
               key={lk.id}
               type="button"
-              className={`tac-btn ${idx === lockIdx ? 'primary' : solvedLocks[idx] ? 'lime' : 'ghost'} chamfer-sm`}
-              style={{ minHeight: 32, padding: '4px 10px', fontSize: 11 }}
+              role="tab"
+              aria-selected={active}
+              className={`breach-step-pill ${active ? 'active' : ''} ${solved ? 'solved' : ''}`}
               onClick={() => {
                 sound.click();
                 setLockIdx(idx);
@@ -78,38 +84,23 @@ export const BreachPanel: React.FC<BreachPanelProps> = ({
                 setFeedback(null);
               }}
             >
-              {solvedLocks[idx] ? '✓ ' : ''}LOCK 0{idx + 1}
+              {solved ? <Check size={12} strokeWidth={2.6} /> : <span>{idx + 1}</span>}
+              <span>
+                {lang === 'zh-Hant' ? `鎖 ${idx + 1}` : `Lock ${idx + 1}`}
+              </span>
             </button>
-          ))}
-        </div>
-        <span className="tac-tag cyan">{tagLabel}</span>
+          );
+        })}
       </div>
 
       <div>
-        <h2 style={{ fontSize: 20 }}>{t(lock.title, lang)}</h2>
-        <p style={{ color: 'var(--ink-secondary)', fontSize: 13.5, marginTop: 4 }}>
-          {t(lock.prompt, lang)}
-        </p>
+        <h2 className="deck-heading">{t(lock.title, lang)}</h2>
+        <p className="deck-copy">{t(lock.prompt, lang)}</p>
       </div>
 
-      {lock.code && (
-        <pre
-          className="mono"
-          style={{
-            margin: 0,
-            padding: '12px 14px',
-            background: '#050a11',
-            border: '1px solid rgba(0, 240, 255, 0.25)',
-            fontSize: 12.5,
-            lineHeight: 1.6,
-            overflowX: 'auto',
-          }}
-        >
-          {lock.code}
-        </pre>
-      )}
+      {lock.code && <pre className="breach-code mono">{lock.code}</pre>}
 
-      <div style={{ display: 'grid', gap: 8 }}>
+      <div className="breach-options">
         {lock.options.map((opt, idx) => {
           const isSel = selectedOpt === idx;
           const stateCls =
@@ -118,71 +109,65 @@ export const BreachPanel: React.FC<BreachPanelProps> = ({
             <button
               key={idx}
               type="button"
-              className={`breach-option chamfer-sm ${stateCls}`}
+              className={`breach-option ${stateCls}`}
               onClick={() => {
                 sound.click();
                 setSelectedOpt(idx);
                 setFeedback(null);
               }}
             >
-              <span className="tac-tag cyan">{String.fromCharCode(65 + idx)}</span>
+              <span className="opt-key mono">{String.fromCharCode(65 + idx)}</span>
               <code style={{ fontSize: 13 }}>{t(opt, lang)}</code>
             </button>
           );
         })}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="tac-btn primary chamfer-sm"
-          disabled={selectedOpt === null}
-          onClick={handleCrack}
-        >
-          {lang === 'zh-Hant' ? '破解訊號鎖' : 'CRACK SIGNAL LOCK'}
-        </button>
+      {feedback && (
+        <div className={`deck-feedback ${feedback.ok ? 'ok' : 'err'}`}>
+          {feedback.text}
+        </div>
+      )}
 
-        {solvedLocks[lockIdx] && lockIdx < locks.length - 1 && !allCleared && (
+      <div className="deck-actions">
+        {!currentSolved ? (
           <button
             type="button"
-            className="tac-btn amber chamfer-sm"
+            className="tac-btn primary deck-primary-cta"
+            disabled={selectedOpt === null}
+            onClick={handleCrack}
+          >
+            {lang === 'zh-Hant' ? '破解此鎖' : 'CRACK LOCK'}
+          </button>
+        ) : allCleared ? (
+          <button
+            type="button"
+            className="tac-btn primary deck-primary-cta"
+            onClick={() => {
+              sound.deploy();
+              onProceedToBattle();
+            }}
+          >
+            <span>{t(proceedLabel, lang)}</span>
+            <ArrowRight size={15} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="tac-btn primary deck-primary-cta"
             onClick={() => {
               sound.click();
-              setLockIdx(lockIdx + 1);
+              const target = nextUnsolvedIdx >= 0 ? nextUnsolvedIdx : (lockIdx + 1) % locks.length;
+              setLockIdx(target);
               setSelectedOpt(null);
               setFeedback(null);
             }}
           >
-            NEXT LOCK →
-          </button>
-        )}
-
-        {allCleared && (
-          <button
-            type="button"
-            className="tac-btn lime chamfer-sm"
-            onClick={() => {
-              sound.click();
-              onProceedToBattle();
-            }}
-          >
-            {t(proceedLabel, lang)} →
+            <span>{lang === 'zh-Hant' ? '下一道鎖' : 'NEXT LOCK'}</span>
+            <ArrowRight size={15} />
           </button>
         )}
       </div>
-
-      {feedback && (
-        <div
-          style={{
-            padding: '10px 12px',
-            fontSize: 12.5,
-            background: feedback.ok ? 'var(--lime-dim)' : 'var(--crimson-dim)',
-            border: `1px solid ${feedback.ok ? 'var(--lime)' : 'var(--crimson)'}`,
-          }}
-        >
-          {feedback.text}
-        </div>
-      )}
-    </section>
+    </div>
   );
 };
