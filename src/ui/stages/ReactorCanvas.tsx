@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { TraceFrame } from '../../engine/vm';
+import { drawArenaAtmosphere, drawByteHero } from './drawByteHero';
 
 export interface ReactorCanvasProps {
   mode: 'recon' | 'swap' | 'reactor' | 'trace';
@@ -151,27 +152,7 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // Background void + subtle tactical grid
-      const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
-      bgGrad.addColorStop(0, '#07111e');
-      bgGrad.addColorStop(1, '#040810');
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, w, h);
-
-      ctx.strokeStyle = 'rgba(0, 240, 255, 0.055)';
-      ctx.lineWidth = 1;
-      for (let gx = 0; gx < w; gx += 36) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 0);
-        ctx.lineTo(gx, h);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy < h; gy += 36) {
-        ctx.beginPath();
-        ctx.moveTo(0, gy);
-        ctx.lineTo(w, gy);
-        ctx.stroke();
-      }
+      drawArenaAtmosphere(ctx, w, h, p.status === 'error' ? '#FF2A5F' : '#00F0FF');
 
       // Aether-9 skyline silhouette at bottom
       const physical = p.energy - p.used;
@@ -186,13 +167,12 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
               : '#00F0FF';
 
       const buildings = [
-        [0.04, 52, 26],
-        [0.11, 78, 28],
-        [0.19, 44, 24],
-        [0.27, 68, 30],
-        [0.72, 64, 28],
-        [0.8, 86, 30],
-        [0.89, 54, 26],
+        [0.03, 52, 26],
+        [0.11, 74, 28],
+        [0.24, 46, 24],
+        [0.72, 66, 28],
+        [0.81, 88, 30],
+        [0.9, 58, 26],
       ];
       buildings.forEach(([xr, bh, bw], idx) => {
         const bx = w * xr;
@@ -203,59 +183,48 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
         ctx.strokeRect(bx, by, bw, bh);
         const lit = isSynced || (p.mode === 'recon' && idx % 2 === 0 && physical >= 65);
         ctx.fillStyle = lit ? towerColor : 'rgba(255, 149, 0, 0.35)';
-        for (let wy = by + 8; wy < h - 10; wy += 12) {
+        for (let wy = by + 8; wy < h - 18; wy += 12) {
           ctx.fillRect(bx + 5, wy, 5, 5);
           ctx.fillRect(bx + bw - 10, wy, 5, 5);
         }
       });
 
-      // Floor conduit beam
-      ctx.strokeStyle =
-        p.status === 'error' ? 'rgba(255, 42, 95, 0.6)' : 'rgba(0, 240, 255, 0.32)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(0, h - 18);
-      ctx.lineTo(w, h - 18);
-      ctx.stroke();
+      // UNIT-01 BYTE full-body transparent mecha hero on left
+      const byteH =
+        w >= 560
+          ? Math.min(325, Math.max(185, h * 0.68))
+          : w >= 430
+            ? Math.min(198, Math.max(145, h * 0.55))
+            : Math.min(144, Math.max(110, h * 0.52));
+      const approxW = byteH * 0.845;
+      const byteX = Math.max(approxW * 0.5 + 8, w * 0.16);
+      const byteY = Math.max(byteH * 0.5 + 34, h * 0.52);
+      const byte = drawByteHero(
+        ctx,
+        byteImgRef.current,
+        byteX,
+        byteY,
+        byteH,
+        t,
+        p.status === 'stale' ? 'stale' : p.status,
+        w >= 430 ? 'UNIT-01 // BYTE' : undefined,
+      );
 
-      // UNIT-01 BYTE floating hover mecha on left
-      const byteX = w * 0.16;
-      const byteY = h * 0.48 + Math.sin(t * 2.4) * 6;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(byteX, byteY, 44, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 240, 255, 0.08)';
-      ctx.fill();
-      ctx.strokeStyle = p.status === 'error' ? '#FF2A5F' : '#00F0FF';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-      ctx.clip();
-      if (byteImgRef.current) {
-        ctx.drawImage(byteImgRef.current, byteX - 44, byteY - 44, 88, 88);
-      } else {
-        ctx.fillStyle = '#E8F4F2';
-        ctx.fillRect(byteX - 16, byteY - 18, 32, 34);
-        ctx.fillStyle = '#00F0FF';
-        ctx.fillRect(byteX - 10, byteY - 10, 20, 8);
-      }
-      ctx.restore();
-
-      ctx.fillStyle = '#00F0FF';
-      ctx.font = '700 10px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('UNIT-01 // BYTE', byteX, byteY + 58);
+      const contentLeft = byte.rightEdge + (w < 430 ? 8 : 14);
+      const contentRight = w - (w < 430 ? 10 : 16);
+      const contentW = Math.max(150, contentRight - contentLeft);
 
       // Mode-specific main centerpiece
       if (p.mode === 'swap') {
         const locals = p.activeFrame?.locals ?? {};
         const changed = p.activeFrame?.changedVar;
+        const baseR = Math.min(42, Math.max(24, contentW * 0.11));
         const slots = [
-          { key: 'left', x: w * 0.44, y: h * 0.46, color: '#00F0FF' },
-          { key: 'temp', x: w * 0.62, y: h * 0.29, color: '#FF9500' },
-          { key: 'right', x: w * 0.8, y: h * 0.46, color: '#B8FF3C' },
+          { key: 'left', x: contentLeft + contentW * 0.18, y: h * 0.55, color: '#00F0FF' },
+          { key: 'temp', x: contentLeft + contentW * 0.5, y: h * 0.28, color: '#FF9500' },
+          { key: 'right', x: contentLeft + contentW * 0.82, y: h * 0.55, color: '#B8FF3C' },
         ];
 
-        // Conduit triangle
         ctx.strokeStyle = 'rgba(0, 240, 255, 0.25)';
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -265,21 +234,20 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
         ctx.lineTo(slots[0].x, slots[0].y);
         ctx.stroke();
 
-        // Active transfer pulse arc
         if (changed && ['left', 'right', 'temp'].includes(changed)) {
           const targetSlot = slots.find((s) => s.key === changed)!;
           ctx.strokeStyle = p.status === 'error' ? '#FF2A5F' : '#FF9500';
           ctx.lineWidth = 3;
           ctx.beginPath();
-          ctx.moveTo(byteX + 42, byteY);
-          ctx.quadraticCurveTo(w * 0.4, h * 0.18, targetSlot.x, targetSlot.y);
+          ctx.moveTo(byte.emitterX, byte.emitterY);
+          ctx.quadraticCurveTo(contentLeft + contentW * 0.22, h * 0.18, targetSlot.x, targetSlot.y);
           ctx.stroke();
         }
 
         slots.forEach((slot) => {
           const snap = locals[slot.key];
           const isHot = changed === slot.key;
-          const r = isHot ? 36 : 32;
+          const r = isHot ? baseR + 4 : baseR;
           ctx.save();
           ctx.beginPath();
           ctx.arc(slot.x, slot.y, r, 0, Math.PI * 2);
@@ -290,19 +258,20 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
           ctx.stroke();
 
           ctx.fillStyle = slot.color;
-          ctx.font = '700 11px "JetBrains Mono", monospace';
+          ctx.font = `700 ${baseR < 28 ? 9 : 11}px "JetBrains Mono", monospace`;
           ctx.textAlign = 'center';
-          ctx.fillText(slot.key.toUpperCase(), slot.x, slot.y - 11);
+          ctx.fillText(slot.key.toUpperCase(), slot.x, slot.y - baseR * 0.34);
 
           ctx.fillStyle = '#E8F4F2';
-          ctx.font = '700 20px "JetBrains Mono", monospace';
-          ctx.fillText(snap ? snap.value : '—', slot.x, slot.y + 12);
+          ctx.font = `700 ${baseR < 28 ? 16 : 22}px "JetBrains Mono", monospace`;
+          ctx.fillText(snap ? snap.value : '—', slot.x, slot.y + baseR * 0.34);
           ctx.restore();
         });
       } else {
-        // Central Reactor / Core
-        const coreX = w * 0.56;
-        const coreY = h * 0.46;
+        // Central Reactor / Core scaled to right zone
+        const coreX = contentLeft + contentW * 0.33;
+        const coreY = h * 0.49;
+        const coreR = Math.min(46, Math.max(26, contentW * 0.12));
         const locals = p.activeFrame?.locals ?? {};
         const coreEnergy =
           p.mode === 'recon'
@@ -318,24 +287,24 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
             ? p.stored
             : locals.remaining?.value ?? '—';
 
-        // Energy beam from BYTE to Reactor when pulse active or synced
-        if (pulseTimerRef.current > 0.05 || p.status === 'ok') {
-          ctx.strokeStyle =
-            p.status === 'error'
-              ? `rgba(255, 42, 95, ${0.45 + pulseTimerRef.current * 0.5})`
-              : `rgba(0, 240, 255, ${0.35 + pulseTimerRef.current * 0.6})`;
-          ctx.lineWidth = 2 + pulseTimerRef.current * 3;
-          ctx.beginPath();
-          ctx.moveTo(byteX + 44, byteY);
-          ctx.lineTo(coreX - 46, coreY);
-          ctx.stroke();
-        }
+        // Energy beam from BYTE arm to Reactor
+        ctx.strokeStyle =
+          p.status === 'error'
+            ? `rgba(255, 42, 95, ${0.45 + pulseTimerRef.current * 0.5})`
+            : pulseTimerRef.current > 0.05 || p.status === 'ok'
+              ? `rgba(0, 240, 255, ${0.45 + pulseTimerRef.current * 0.5})`
+              : 'rgba(0, 240, 255, 0.24)';
+        ctx.lineWidth = 2 + pulseTimerRef.current * 3;
+        ctx.beginPath();
+        ctx.moveTo(byte.emitterX, byte.emitterY);
+        ctx.lineTo(coreX - coreR - 4, coreY);
+        ctx.stroke();
 
         // Boss shield hex rings (if in reactor boss mode)
         if (p.mode === 'reactor') {
           for (let s = 0; s < p.bossShields; s++) {
             const cracked = s < p.brokenShields;
-            const radius = 58 + s * 11;
+            const radius = coreR + 18 + s * (coreR < 32 ? 7 : 11);
             ctx.save();
             ctx.translate(coreX, coreY);
             ctx.rotate((cracked ? 0.12 : t * (0.35 + s * 0.14)) * (s % 2 ? -1 : 1));
@@ -354,25 +323,25 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
 
         // Core circle
         const coreGlow = p.status === 'error' ? '#FF2A5F' : isSynced ? '#B8FF3C' : '#00F0FF';
-        const rad = ctx.createRadialGradient(coreX, coreY, 6, coreX, coreY, 54);
+        const rad = ctx.createRadialGradient(coreX, coreY, 6, coreX, coreY, coreR + 22);
         rad.addColorStop(0, coreGlow);
         rad.addColorStop(0.5, 'rgba(0, 240, 255, 0.16)');
         rad.addColorStop(1, 'transparent');
         ctx.fillStyle = rad;
         ctx.beginPath();
-        ctx.arc(coreX, coreY, 54, 0, Math.PI * 2);
+        ctx.arc(coreX, coreY, coreR + 22, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.beginPath();
-        ctx.arc(coreX, coreY, 34, 0, Math.PI * 2);
+        ctx.arc(coreX, coreY, coreR, 0, Math.PI * 2);
         ctx.fillStyle = '#091522';
         ctx.fill();
         ctx.strokeStyle = coreGlow;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2.6;
         ctx.stroke();
 
         ctx.fillStyle = '#E8F4F2';
-        ctx.font = '700 20px "JetBrains Mono", monospace';
+        ctx.font = `700 ${coreR < 32 ? 16 : 22}px "JetBrains Mono", monospace`;
         ctx.textAlign = 'center';
         ctx.fillText(`${corePhysical}`, coreX, coreY + 4);
         ctx.fillStyle = '#7C9BB0';
@@ -380,8 +349,10 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
         ctx.fillText('LIVE MW', coreX, coreY + 18);
 
         // Right-side Holographic Memory Core Pod
-        const memX = w * 0.83;
-        const memY = h * 0.46;
+        const podW = Math.min(136, Math.max(82, contentW * 0.38));
+        const podH = Math.min(94, Math.max(70, h * 0.24));
+        const memX = contentRight - podW / 2;
+        const memY = h * 0.49;
         const stale =
           p.mode === 'recon'
             ? p.stored !== corePhysical
@@ -392,37 +363,37 @@ export const ReactorCanvas: React.FC<ReactorCanvasProps> = ({
         ctx.lineWidth = 1.6;
         ctx.setLineDash(stale ? [5, 5] : []);
         ctx.beginPath();
-        ctx.moveTo(coreX + 36, coreY);
-        ctx.lineTo(memX - 48, memY);
+        ctx.moveTo(coreX + coreR + 2, coreY);
+        ctx.lineTo(memX - podW / 2, memY);
         ctx.stroke();
         ctx.setLineDash([]);
 
         ctx.fillStyle = 'rgba(11, 20, 32, 0.92)';
         ctx.strokeStyle = stale ? '#FF9500' : '#00F0FF';
         ctx.lineWidth = 2;
-        ctx.fillRect(memX - 48, memY - 40, 96, 80);
-        ctx.strokeRect(memX - 48, memY - 40, 96, 80);
+        ctx.fillRect(memX - podW / 2, memY - podH / 2, podW, podH);
+        ctx.strokeRect(memX - podW / 2, memY - podH / 2, podW, podH);
 
         ctx.fillStyle = stale ? '#FF9500' : '#00F0FF';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
-        ctx.fillText('MEMORY: remaining', memX, memY - 21);
+        ctx.font = `700 ${podW < 95 ? 8 : 9.5}px "JetBrains Mono", monospace`;
+        ctx.fillText(podW < 95 ? 'MEM: remaining' : 'MEMORY: remaining', memX, memY - podH * 0.24);
 
         ctx.fillStyle = stale ? '#FFB84D' : '#B8FF3C';
-        ctx.font = '700 26px "JetBrains Mono", monospace';
-        ctx.fillText(String(coreStored), memX, memY + 11);
+        ctx.font = `700 ${podW < 95 ? 22 : 28}px "JetBrains Mono", monospace`;
+        ctx.fillText(String(coreStored), memX, memY + 10);
 
         ctx.fillStyle = stale ? '#FF2A5F' : '#B8FF3C';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
-        ctx.fillText(stale ? 'STALE SNAPSHOT!' : 'SYNCED', memX, memY + 29);
+        ctx.font = `700 ${podW < 95 ? 8 : 9.5}px "JetBrains Mono", monospace`;
+        ctx.fillText(stale ? 'STALE SNAPSHOT!' : 'SYNCED', memX, memY + podH * 0.36);
 
         if (locals.initialRemaining) {
           ctx.fillStyle = 'rgba(0, 240, 255, 0.14)';
-          ctx.fillRect(memX - 48, memY + 46, 96, 22);
+          ctx.fillRect(memX - podW / 2, memY + podH / 2 + 6, podW, 22);
           ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
-          ctx.strokeRect(memX - 48, memY + 46, 96, 22);
+          ctx.strokeRect(memX - podW / 2, memY + podH / 2 + 6, podW, 22);
           ctx.fillStyle = '#E8F4F2';
           ctx.font = '600 10px "JetBrains Mono", monospace';
-          ctx.fillText(`initSnap: ${locals.initialRemaining.value}`, memX, memY + 61);
+          ctx.fillText(`initSnap: ${locals.initialRemaining.value}`, memX, memY + podH / 2 + 21);
         }
       }
 

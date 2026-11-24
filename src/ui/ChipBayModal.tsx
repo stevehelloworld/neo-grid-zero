@@ -45,9 +45,11 @@ export const ChipBayModal: React.FC<ChipBayModalProps> = ({
               src="./assets/byte-unit.png"
               alt="UNIT-01 BYTE"
               style={{
-                width: 56,
-                height: 56,
-                objectFit: 'cover',
+                width: 64,
+                height: 64,
+                objectFit: 'contain',
+                background: '#08121f',
+                padding: 3,
                 border: '1px solid var(--cyan)',
                 borderRadius: 6,
               }}

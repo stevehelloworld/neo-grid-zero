@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { TraceFrame } from '../../engine/vm';
+import { drawArenaAtmosphere, drawByteHero } from './drawByteHero';
 
 export interface RadarCanvasProps {
   mode: 'recon' | 'battle';
@@ -98,26 +99,33 @@ export const RadarCanvas: React.FC<RadarCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      const bg = ctx.createLinearGradient(0, 0, 0, h);
-      bg.addColorStop(0, '#071220');
-      bg.addColorStop(1, '#040811');
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
+      drawArenaAtmosphere(ctx, w, h, p.status === 'error' ? '#FF2A5F' : '#00F0FF');
 
-      // BYTE on left
-      const bx = w * 0.13;
-      const by = h * 0.56 + Math.sin(t * 2.3) * 4;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(bx, by, 32, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 240, 255, 0.08)';
-      ctx.fill();
-      ctx.strokeStyle = p.status === 'error' ? '#FF2A5F' : '#00F0FF';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-      ctx.clip();
-      if (byteImgRef.current) ctx.drawImage(byteImgRef.current, bx - 32, by - 32, 64, 64);
-      ctx.restore();
+      // Full-body transparent Hero BYTE on left
+      const byteH =
+        w >= 560
+          ? Math.min(325, Math.max(180, h * 0.68))
+          : w >= 430
+            ? Math.min(192, Math.max(140, h * 0.55))
+            : Math.min(140, Math.max(106, h * 0.51));
+      const approxW = byteH * 0.845;
+      const bx = Math.max(approxW * 0.5 + 8, w * 0.16);
+      const by = Math.max(byteH * 0.5 + 34, h * 0.53);
+      const byte = drawByteHero(
+        ctx,
+        byteImgRef.current,
+        bx,
+        by,
+        byteH,
+        t,
+        p.status,
+        w >= 430 ? 'UNIT-01 // RADAR' : undefined,
+      );
+
+      const contentLeft = byte.rightEdge + (w < 430 ? 8 : 14);
+      const contentRight = w - (w < 430 ? 10 : 16);
+      const contentW = Math.max(150, contentRight - contentLeft);
+      const contentCx = contentLeft + contentW / 2;
 
       const locals = p.activeFrame?.locals ?? {};
       const traceR = locals.r !== undefined ? Number(locals.r.value) : -1;
@@ -126,17 +134,31 @@ export const RadarCanvas: React.FC<RadarCanvasProps> = ({
       if (p.mode === 'recon') {
         const numR = Math.max(1, p.rows);
         const numC = p.shape === 'rect' ? Math.max(1, p.cols) : numR;
-        const cellSize = Math.min(34, (h - 120) / numR - 4);
-        const startX = w * 0.34;
-        const startY = 82;
+        const cellGap = 5;
+        const cellSize = Math.min(
+          54,
+          Math.max(18, Math.min((contentW - 12) / numC - cellGap, (h - 115) / numR - cellGap)),
+        );
+        const gridW = numC * (cellSize + cellGap) - cellGap;
+        const gridH = numR * (cellSize + cellGap) - cellGap;
+        const startX = contentLeft + Math.max(0, (contentW - gridW) / 2);
+        const startY = Math.max(66, (h - 32 - gridH) / 2);
+
+        // Radar beam from BYTE arm to lattice
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.28)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(byte.emitterX, byte.emitterY);
+        ctx.lineTo(startX, startY + gridH / 2);
+        ctx.stroke();
 
         let idx = 0;
         for (let r = 1; r <= numR; r++) {
           const maxC = p.shape === 'rect' ? numC : r;
           for (let c = 1; c <= maxC; c++) {
             idx++;
-            const cx = startX + (c - 1) * (cellSize + 5);
-            const cy = startY + (r - 1) * (cellSize + 5);
+            const cx = startX + (c - 1) * (cellSize + cellGap);
+            const cy = startY + (r - 1) * (cellSize + cellGap);
             const lit = idx <= p.litCount;
             ctx.fillStyle = lit ? 'rgba(184, 255, 60, 0.25)' : 'rgba(11, 20, 32, 0.9)';
             ctx.fillRect(cx, cy, cellSize, cellSize);
@@ -145,7 +167,7 @@ export const RadarCanvas: React.FC<RadarCanvasProps> = ({
             ctx.strokeRect(cx, cy, cellSize, cellSize);
             if (lit) {
               ctx.fillStyle = '#B8FF3C';
-              ctx.font = '700 14px "JetBrains Mono", monospace';
+              ctx.font = `700 ${Math.max(11, cellSize * 0.44)}px "JetBrains Mono", monospace`;
               ctx.textAlign = 'center';
               ctx.fillText('#', cx + cellSize / 2, cy + cellSize / 2 + 5);
             }
@@ -154,24 +176,42 @@ export const RadarCanvas: React.FC<RadarCanvasProps> = ({
 
         ctx.fillStyle = '#00F0FF';
         ctx.font = '700 12px "JetBrains Mono", monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(`CELL VISITS: ${p.litCount}`, startX, h - 26);
+        ctx.textAlign = 'center';
+        ctx.fillText(`CELL VISITS: ${p.litCount}`, contentCx, h - 28);
       } else {
-        // Battle or Trace Pattern Matrix
+        // Battle or Trace Pattern Matrix centered in Right Zone
         const actualLines = p.patternText ? p.patternText.split('\n') : [];
         const expectedLines = p.expectedText ? p.expectedText.split('\n') : [];
         const totalRows = Math.max(1, expectedLines.length, actualLines.length, p.rows);
-        const cellSize = Math.min(32, (h - 128) / totalRows - 4);
-        const startX = w * 0.3;
-        const startY = 82;
+        const maxCols = Math.max(
+          totalRows,
+          ...actualLines.map((l) => l.length),
+          ...expectedLines.map((l) => l.length),
+        );
+        const cellGap = 4;
+        const cellSize = Math.min(
+          50,
+          Math.max(16, Math.min((contentW - 12) / maxCols - cellGap, (h - 118) / totalRows - cellGap)),
+        );
+        const gridW = maxCols * (cellSize + cellGap) - cellGap;
+        const gridH = totalRows * (cellSize + cellGap) - cellGap;
+        const startX = contentLeft + Math.max(0, (contentW - gridW) / 2);
+        const startY = Math.max(66, (h - 32 - gridH) / 2);
+
+        ctx.strokeStyle = p.status === 'error' ? 'rgba(255, 42, 95, 0.32)' : 'rgba(0, 240, 255, 0.26)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(byte.emitterX, byte.emitterY);
+        ctx.lineTo(startX, startY + gridH / 2);
+        ctx.stroke();
 
         for (let r = 0; r < totalRows; r++) {
           const actRow = actualLines[r] ?? '';
           const expRow = expectedLines[r] ?? '';
           const colsInRow = Math.max(actRow.length, expRow.length);
           for (let c = 0; c < colsInRow; c++) {
-            const cx = startX + c * (cellSize + 4);
-            const cy = startY + r * (cellSize + 4);
+            const cx = startX + c * (cellSize + cellGap);
+            const cy = startY + r * (cellSize + cellGap);
             const hasAct = actRow[c] === '#';
             const hasExp = expRow[c] === '#';
             const match = hasAct && hasExp && p.patternText === p.expectedText;
@@ -197,7 +237,7 @@ export const RadarCanvas: React.FC<RadarCanvasProps> = ({
 
             if (hasAct) {
               ctx.fillStyle = hasExp ? '#B8FF3C' : '#FF6B90';
-              ctx.font = '700 14px "JetBrains Mono", monospace';
+              ctx.font = `700 ${Math.max(11, cellSize * 0.44)}px "JetBrains Mono", monospace`;
               ctx.textAlign = 'center';
               ctx.fillText('#', cx + cellSize / 2, cy + cellSize / 2 + 5);
             }
@@ -206,26 +246,28 @@ export const RadarCanvas: React.FC<RadarCanvasProps> = ({
 
         if (p.patternText.endsWith('\n') && p.expectedText && !p.expectedText.endsWith('\n')) {
           ctx.fillStyle = '#FF6B90';
-          ctx.font = '700 11px "JetBrains Mono", monospace';
-          ctx.textAlign = 'left';
-          ctx.fillText('WARNING: TRAILING NEWLINE (\\n) DETECTED!', startX, h - 24);
+          ctx.font = `700 ${w < 430 ? 9.5 : 11}px "JetBrains Mono", monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText('WARNING: TRAILING NEWLINE (\\n) DETECTED!', contentCx, h - 26);
         }
 
-        // Boss Hydra Dome
-        const hx = w * 0.9;
-        const hy = 54;
-        for (let s = 0; s < p.bossShields; s++) {
-          const broken = s < p.brokenShields;
-          ctx.beginPath();
-          ctx.arc(hx, hy, 15 + s * 6, 0, Math.PI * 2);
-          ctx.strokeStyle = broken ? 'rgba(184, 255, 60, 0.4)' : '#FF2A5F';
-          ctx.lineWidth = broken ? 1.2 : 2.2;
-          ctx.stroke();
+        // Boss Hydra Dome (desktop)
+        if (w >= 560) {
+          const hx = w - 36;
+          const hy = 38;
+          for (let s = 0; s < p.bossShields; s++) {
+            const broken = s < p.brokenShields;
+            ctx.beginPath();
+            ctx.arc(hx, hy, 11 + s * 4, 0, Math.PI * 2);
+            ctx.strokeStyle = broken ? 'rgba(184, 255, 60, 0.4)' : '#FF2A5F';
+            ctx.lineWidth = broken ? 1.2 : 2;
+            ctx.stroke();
+          }
+          ctx.fillStyle = p.brokenShields >= p.bossShields ? '#B8FF3C' : '#FF2A5F';
+          ctx.font = '700 8px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText('HYDRA', hx, hy + 3);
         }
-        ctx.fillStyle = p.brokenShields >= p.bossShields ? '#B8FF3C' : '#FF2A5F';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('HYDRA', hx, hy + 3);
       }
 
       ctx.restore();

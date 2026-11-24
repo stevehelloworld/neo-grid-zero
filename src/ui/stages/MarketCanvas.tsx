@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { TraceFrame } from '../../engine/vm';
+import { drawArenaAtmosphere, drawByteHero } from './drawByteHero';
 
 export interface MarketCanvasProps {
   mode: 'recon' | 'splitter' | 'titan' | 'trace';
@@ -122,60 +123,42 @@ export const MarketCanvas: React.FC<MarketCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // Neon Market Dusk Background
-      const bg = ctx.createLinearGradient(0, 0, 0, h);
-      bg.addColorStop(0, '#0c0b1c');
-      bg.addColorStop(1, '#060c14');
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
-
-      // Grid lines
-      ctx.strokeStyle = 'rgba(255, 149, 0, 0.06)';
-      ctx.lineWidth = 1;
-      for (let gx = 0; gx < w; gx += 36) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 0);
-        ctx.lineTo(gx, h);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy < h; gy += 36) {
-        ctx.beginPath();
-        ctx.moveTo(0, gy);
-        ctx.lineTo(w, gy);
-        ctx.stroke();
-      }
+      drawArenaAtmosphere(ctx, w, h, '#FF9500');
 
       // Neon market lanterns at top
       for (let l = 0; l < 6; l++) {
-        const lx = w * (0.24 + l * 0.11);
-        const ly = 54 + Math.sin(t * 2 + l) * 2;
+        const lx = w * (0.28 + l * 0.11);
+        const ly = 48 + Math.sin(t * 2 + l) * 2;
         ctx.fillStyle = l % 2 === 0 ? '#FF9500' : '#00F0FF';
         ctx.beginPath();
-        ctx.arc(lx, ly, 5, 0, Math.PI * 2);
+        ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // BYTE Hover Unit
-      const bx = w * 0.14;
-      const by = h * 0.56 + Math.sin(t * 2.3) * 5;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(bx, by, 38, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 240, 255, 0.08)';
-      ctx.fill();
-      ctx.strokeStyle = p.status === 'error' ? '#FF2A5F' : '#00F0FF';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-      ctx.clip();
-      if (byteImgRef.current) {
-        ctx.drawImage(byteImgRef.current, bx - 38, by - 38, 76, 76);
-      }
-      ctx.restore();
-      ctx.fillStyle = '#00F0FF';
-      ctx.font = '700 9px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('BYTE // LEDGER', bx, by + 51);
+      // Full-body transparent BYTE Hover Unit
+      const byteH =
+        w >= 560
+          ? Math.min(325, Math.max(185, h * 0.68))
+          : w >= 430
+            ? Math.min(194, Math.max(142, h * 0.55))
+            : Math.min(142, Math.max(108, h * 0.52));
+      const approxW = byteH * 0.845;
+      const bx = Math.max(approxW * 0.5 + 8, w * 0.16);
+      const by = Math.max(byteH * 0.5 + 34, h * 0.53);
+      const byte = drawByteHero(
+        ctx,
+        byteImgRef.current,
+        bx,
+        by,
+        byteH,
+        t,
+        p.status,
+        w >= 430 ? 'UNIT-01 // LEDGER' : undefined,
+      );
 
+      const contentLeft = byte.rightEdge + (w < 430 ? 8 : 14);
+      const contentRight = w - (w < 430 ? 10 : 16);
+      const contentW = Math.max(150, contentRight - contentLeft);
       const locals = p.activeFrame?.locals ?? {};
 
       if (p.mode === 'titan' || p.mode === 'trace') {
@@ -196,15 +179,19 @@ export const MarketCanvas: React.FC<MarketCanvasProps> = ({
                 { k: 'exactShare', label: 'EXACT (double)', color: '#B8FF3C' },
               ];
 
-        const cols = 3;
-        const startX = w * 0.3;
-        const cardW = (w * 0.66) / cols - 8;
-        const cardH = 64;
+        const cols = contentW >= 280 ? 3 : 2;
+        const rows = Math.ceil(cards.length / cols);
+        const gapX = w < 430 ? 6 : 10;
+        const gapY = h < 320 ? 8 : 14;
+        const startY = Math.max(68, (h - rows * 76) / 2 + 12);
+        const cardW = (contentW - (cols - 1) * gapX) / cols;
+        const cardH = Math.min(92, Math.max(48, (h - startY - 30 - (rows - 1) * gapY) / rows));
+
         cards.forEach((c, idx) => {
           const row = Math.floor(idx / cols);
           const col = idx % cols;
-          const cx = startX + col * (cardW + 10);
-          const cy = 92 + row * (cardH + 14);
+          const cx = contentLeft + col * (cardW + gapX);
+          const cy = startY + row * (cardH + gapY);
           const val = locals[c.k];
           const hot = p.activeFrame?.changedVar === c.k;
 
@@ -215,28 +202,28 @@ export const MarketCanvas: React.FC<MarketCanvasProps> = ({
           ctx.strokeRect(cx, cy, cardW, cardH);
 
           ctx.fillStyle = c.color;
-          ctx.font = '700 10px "JetBrains Mono", monospace';
+          ctx.font = `700 ${cardW < 95 ? 8.5 : 10.5}px "JetBrains Mono", monospace`;
           ctx.textAlign = 'left';
-          ctx.fillText(c.label, cx + 10, cy + 18);
+          ctx.fillText(c.label, cx + 8, cy + 18);
 
           ctx.fillStyle = '#E8F4F2';
-          ctx.font = '700 18px "JetBrains Mono", monospace';
-          ctx.fillText(val ? val.value.slice(0, 10) : '—', cx + 10, cy + 44);
+          ctx.font = `700 ${cardW < 95 ? 15 : 20}px "JetBrains Mono", monospace`;
+          ctx.fillText(val ? val.value.slice(0, 10) : '—', cx + 8, cy + cardH - 14);
         });
 
-        if (p.mode === 'titan') {
-          const tx = w * 0.89;
-          const ty = 52;
+        if (p.mode === 'titan' && w >= 560) {
+          const tx = w - 36;
+          const ty = 38;
           for (let s = 0; s < p.bossShields; s++) {
             const cracked = s < p.brokenShields;
             ctx.beginPath();
-            ctx.arc(tx, ty, 15 + s * 6, 0, Math.PI * 2);
+            ctx.arc(tx, ty, 11 + s * 4, 0, Math.PI * 2);
             ctx.strokeStyle = cracked ? 'rgba(184, 255, 60, 0.4)' : '#FF2A5F';
-            ctx.lineWidth = cracked ? 1.2 : 2.2;
+            ctx.lineWidth = cracked ? 1.2 : 2;
             ctx.stroke();
           }
           ctx.fillStyle = p.brokenShields >= p.bossShields ? '#B8FF3C' : '#FF2A5F';
-          ctx.font = '700 9px "JetBrains Mono", monospace';
+          ctx.font = '700 8px "JetBrains Mono", monospace';
           ctx.textAlign = 'center';
           ctx.fillText('TITAN', tx, ty + 3);
         }
@@ -257,79 +244,106 @@ export const MarketCanvas: React.FC<MarketCanvasProps> = ({
             ? Number(locals.leftovers.value)
             : totalUnits % numSquads;
 
-        const bayStart = w * 0.29;
-        const bayAreaW = w * 0.67;
+        const bayStart = contentLeft;
+        const bayAreaW = contentW;
         const slotCount = numSquads + 1;
-        const slotW = Math.min(82, bayAreaW / slotCount - 8);
+        const gap = w < 430 ? 4 : 8;
+        const slotW = Math.min(88, Math.max(24, (bayAreaW - (slotCount - 1) * gap) / slotCount));
+        const usedW = slotCount * slotW + (slotCount - 1) * gap;
+        const alignedStart = bayStart + Math.max(0, (bayAreaW - usedW) / 2);
+
+        const ribbonY = Math.max(66, h * 0.18);
+        const sy = ribbonY + 46;
+        const bayH = Math.min(168, Math.max(96, h - sy - 28));
+
+        // Top summary ribbon
+        ctx.fillStyle = 'rgba(6, 11, 18, 0.9)';
+        ctx.fillRect(alignedStart, ribbonY, usedW, 34);
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.35)';
+        ctx.strokeRect(alignedStart, ribbonY, usedW, 34);
+        ctx.fillStyle = '#E8F4F2';
+        ctx.font = `700 ${w < 430 ? 10 : 12.5}px "JetBrains Mono", monospace`;
+        ctx.textAlign = 'center';
+        const exactTxt = showAssigned
+          ? `EXACT = ${(totalUnits / numSquads).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`
+          : `${totalUnits} CRATES → ${numSquads} SQUADS`;
+        ctx.fillText(exactTxt, alignedStart + usedW / 2, ribbonY + 21);
+
+        // Delivery line from BYTE arm to bays
+        ctx.strokeStyle = showAssigned ? 'rgba(184, 255, 60, 0.38)' : 'rgba(0, 240, 255, 0.25)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(byte.emitterX, byte.emitterY);
+        ctx.lineTo(alignedStart, sy + bayH * 0.35);
+        ctx.stroke();
 
         for (let i = 0; i < numSquads; i++) {
-          const sx = bayStart + i * (slotW + 8);
-          const sy = h * 0.42;
+          const sx = alignedStart + i * (slotW + gap);
           ctx.fillStyle = 'rgba(11, 20, 32, 0.92)';
-          ctx.fillRect(sx, sy, slotW, 118);
+          ctx.fillRect(sx, sy, slotW, bayH);
           ctx.strokeStyle = showAssigned ? '#B8FF3C' : 'rgba(0, 240, 255, 0.4)';
           ctx.lineWidth = 1.5;
-          ctx.strokeRect(sx, sy, slotW, 118);
+          ctx.strokeRect(sx, sy, slotW, bayH);
 
           ctx.fillStyle = '#00F0FF';
-          ctx.font = '700 9px "JetBrains Mono", monospace';
+          ctx.font = `700 ${slotW < 38 ? 8 : 9.5}px "JetBrains Mono", monospace`;
           ctx.textAlign = 'center';
           ctx.fillText(`SQ-${i + 1}`, sx + slotW / 2, sy + 16);
 
           if (showAssigned) {
             const crates = Math.min(12, Math.max(0, each));
+            const perRow = slotW < 42 ? 2 : 3;
+            const boxSz = slotW < 42 ? 7 : Math.min(12, (slotW - 18) / perRow);
             for (let c = 0; c < crates; c++) {
-              const col = c % 3;
-              const row = Math.floor(c / 3);
+              const col = c % perRow;
+              const row = Math.floor(c / perRow);
               ctx.fillStyle = '#FFD166';
-              ctx.fillRect(sx + 10 + col * 16, sy + 28 + row * 14, 12, 10);
+              ctx.fillRect(
+                sx + 8 + col * (boxSz + 3),
+                sy + 28 + row * (boxSz + 4),
+                boxSz,
+                Math.max(6, boxSz - 2),
+              );
             }
             ctx.fillStyle = '#B8FF3C';
-            ctx.font = '700 14px "JetBrains Mono", monospace';
-            ctx.fillText(`${each}`, sx + slotW / 2, sy + 106);
+            ctx.font = `700 ${slotW < 38 ? 13 : 16}px "JetBrains Mono", monospace`;
+            ctx.fillText(`${each}`, sx + slotW / 2, sy + bayH - 12);
           } else {
             ctx.fillStyle = '#7C9BB0';
-            ctx.font = '700 15px "JetBrains Mono", monospace';
-            ctx.fillText('?', sx + slotW / 2, sy + 70);
+            ctx.font = '700 16px "JetBrains Mono", monospace';
+            ctx.fillText('?', sx + slotW / 2, sy + bayH * 0.56);
           }
         }
 
         // Remainder bin (%)
-        const rx = bayStart + numSquads * (slotW + 8);
-        const ry = h * 0.42;
+        const rx = alignedStart + numSquads * (slotW + gap);
         ctx.fillStyle = 'rgba(255, 149, 0, 0.12)';
-        ctx.fillRect(rx, ry, slotW, 118);
+        ctx.fillRect(rx, sy, slotW, bayH);
         ctx.strokeStyle = '#FF9500';
         ctx.lineWidth = 1.8;
-        ctx.strokeRect(rx, ry, slotW, 118);
+        ctx.strokeRect(rx, sy, slotW, bayH);
         ctx.fillStyle = '#FF9500';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
+        ctx.font = `700 ${slotW < 38 ? 8 : 9.5}px "JetBrains Mono", monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText('LEFT %', rx + slotW / 2, ry + 16);
+        ctx.fillText('LEFT %', rx + slotW / 2, sy + 16);
         if (showAssigned) {
+          const perRow = slotW < 42 ? 2 : 3;
+          const boxSz = slotW < 42 ? 7 : Math.min(12, (slotW - 18) / perRow);
           for (let c = 0; c < Math.min(9, Math.max(0, rem)); c++) {
-            const col = c % 3;
-            const row = Math.floor(c / 3);
+            const col = c % perRow;
+            const row = Math.floor(c / perRow);
             ctx.fillStyle = '#FF9500';
-            ctx.fillRect(rx + 10 + col * 16, ry + 28 + row * 14, 12, 10);
+            ctx.fillRect(
+              rx + 8 + col * (boxSz + 3),
+              sy + 28 + row * (boxSz + 4),
+              boxSz,
+              Math.max(6, boxSz - 2),
+            );
           }
           ctx.fillStyle = '#FFD166';
-          ctx.font = '700 14px "JetBrains Mono", monospace';
-          ctx.fillText(`${rem}`, rx + slotW / 2, ry + 106);
+          ctx.font = `700 ${slotW < 38 ? 13 : 16}px "JetBrains Mono", monospace`;
+          ctx.fillText(`${rem}`, rx + slotW / 2, sy + bayH - 12);
         }
-
-        // Top summary ribbon
-        ctx.fillStyle = 'rgba(6, 11, 18, 0.9)';
-        ctx.fillRect(bayStart, 82, bayAreaW - 10, 32);
-        ctx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
-        ctx.strokeRect(bayStart, 82, bayAreaW - 10, 32);
-        ctx.fillStyle = '#E8F4F2';
-        ctx.font = '700 12px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        const exactTxt = showAssigned
-          ? `EXACT = ${(totalUnits / numSquads).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}`
-          : `${totalUnits} CRATES → ${numSquads} SQUADS`;
-        ctx.fillText(exactTxt, bayStart + (bayAreaW - 10) / 2, 102);
       }
 
       // Sparks

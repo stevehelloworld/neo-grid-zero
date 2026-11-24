@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { TraceFrame } from '../../engine/vm';
+import { drawArenaAtmosphere, drawByteHero } from './drawByteHero';
 
 export interface ActiveDroneVisual {
   callsign: string;
@@ -154,34 +155,25 @@ export const SentinelCanvas: React.FC<SentinelCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // Sky-gate twilight backdrop
-      const bg = ctx.createLinearGradient(0, 0, w, h);
-      bg.addColorStop(0, '#070F1B');
-      bg.addColorStop(1, '#091827');
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
+      drawArenaAtmosphere(
+        ctx,
+        w,
+        h,
+        p.activeDrone && !p.activeDrone.passed ? '#FF2A5F' : '#00F0FF',
+      );
 
-      // Perspective airspace grid
-      ctx.strokeStyle = 'rgba(0, 240, 255, 0.055)';
-      ctx.lineWidth = 1;
-      for (let gx = 0; gx < w; gx += 40) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 0);
-        ctx.lineTo(gx, h);
-        ctx.stroke();
-      }
-      for (let gy = 0; gy < h; gy += 36) {
-        ctx.beginPath();
-        ctx.moveTo(0, gy);
-        ctx.lineTo(w, gy);
-        ctx.stroke();
-      }
-
-      const gateX = w * 0.44;
+      const gateX = Math.max(w * 0.42, 128);
+      const badgeW = Math.min(84, Math.max(60, w * 0.19));
+      const badgeX = w - badgeW - 12;
       const targetLane =
         p.activeDrone?.actual && LANE_RATIOS[p.activeDrone.actual]
           ? p.activeDrone.actual
           : p.selectedGate;
+
+      const byteH =
+        w >= 560
+          ? Math.min(205, Math.max(142, h * 0.48))
+          : Math.min(134, Math.max(96, h * 0.42));
 
       // Draw 3 flight corridors on right half
       (['CLEAR', 'PRACTICE', 'WAIT'] as const).forEach((lane) => {
@@ -199,67 +191,60 @@ export const SentinelCanvas: React.FC<SentinelCanvasProps> = ({
         ctx.lineWidth = highlighted ? 2.6 : 1.3;
         ctx.beginPath();
         ctx.moveTo(gateX + 26, h * 0.56);
-        ctx.bezierCurveTo(gateX + 85, h * 0.56, gateX + 95, ly, w * 0.88, ly);
+        ctx.bezierCurveTo(gateX + 80, h * 0.56, gateX + 95, ly, badgeX - 4, ly);
         ctx.stroke();
 
         // Corridor badge on far right
         ctx.fillStyle = highlighted ? 'rgba(11, 20, 32, 0.96)' : 'rgba(6, 11, 18, 0.78)';
-        ctx.fillRect(w * 0.83, ly - 15, 76, 30);
+        ctx.fillRect(badgeX, ly - 15, badgeW, 30);
         ctx.strokeStyle = isWrongCrash ? '#FF2A5F' : laneColor;
         ctx.lineWidth = highlighted ? 2 : 1;
-        ctx.strokeRect(w * 0.83, ly - 15, 76, 30);
+        ctx.strokeRect(badgeX, ly - 15, badgeW, 30);
         ctx.fillStyle = isWrongCrash ? '#FF6B90' : laneColor;
-        ctx.font = '700 10px "JetBrains Mono", monospace';
+        ctx.font = `700 ${badgeW < 70 ? 9 : 10.5}px "JetBrains Mono", monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText(lane, w * 0.83 + 38, ly + 4);
+        ctx.fillText(lane, badgeX + badgeW / 2, ly + 4);
 
         // Wrong-lane barrier bar
         if (isWrongCrash && flightProgressRef.current > 0.52) {
           ctx.strokeStyle = '#FF2A5F';
           ctx.lineWidth = 4;
           ctx.beginPath();
-          ctx.moveTo(w * 0.71, ly - 20);
-          ctx.lineTo(w * 0.71, ly + 20);
+          ctx.moveTo(badgeX - 32, ly - 20);
+          ctx.lineTo(badgeX - 32, ly + 20);
           ctx.stroke();
         }
       });
 
-      // UNIT-01 BYTE at Tri-Gate Switcher
-      const byteY = h * 0.56 + Math.sin(t * 2.5) * 4;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(gateX, byteY, 32, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 240, 255, 0.1)';
-      ctx.fill();
-      ctx.strokeStyle = '#00F0FF';
-      ctx.lineWidth = 1.8;
-      ctx.stroke();
-      ctx.clip();
-      if (byteImgRef.current) {
-        ctx.drawImage(byteImgRef.current, gateX - 32, byteY - 32, 64, 64);
-      }
-      ctx.restore();
+      // Full-body transparent UNIT-01 BYTE at Tri-Gate Switcher
+      const byteStatus = p.activeDrone && !p.activeDrone.passed ? 'error' : 'idle';
+      const byte = drawByteHero(
+        ctx,
+        byteImgRef.current,
+        gateX,
+        h * 0.55,
+        byteH,
+        t,
+        byteStatus,
+        w >= 430 ? 'BYTE // TRI-GATE' : undefined,
+      );
 
-      ctx.fillStyle = '#00F0FF';
-      ctx.font = '700 9px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('BYTE // TRI-GATE', gateX, byteY + 45);
-
-      // Boss Sentinel Shield Dome on upper-right in battle mode
-      if (p.mode === 'battle') {
-        const bx = w * 0.9;
-        const by = 54;
+      // Boss Sentinel Shield Dome on upper-right in battle mode (desktop)
+      if (p.mode === 'battle' && w >= 560) {
+        const bx = w - 36;
+        const by = 38;
         for (let i = 0; i < p.bossShields; i++) {
           const broken = i < p.brokenShields;
           ctx.beginPath();
-          ctx.arc(bx, by, 16 + i * 6, Math.PI * 0.65, Math.PI * 1.65);
+          ctx.arc(bx, by, 11 + i * 4, Math.PI * 0.65, Math.PI * 1.65);
           ctx.strokeStyle = broken ? 'rgba(184, 255, 60, 0.45)' : '#FF2A5F';
-          ctx.lineWidth = broken ? 1.4 : 2.3;
+          ctx.lineWidth = broken ? 1.4 : 2;
           ctx.stroke();
         }
         ctx.fillStyle = p.brokenShields >= p.bossShields ? '#B8FF3C' : '#FF2A5F';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
-        ctx.fillText('SENTINEL', bx, by + 4);
+        ctx.font = '700 8px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('SENTINEL', bx, by + 3);
       }
 
       // Active flying drone
@@ -271,12 +256,12 @@ export const SentinelCanvas: React.FC<SentinelCanvasProps> = ({
 
         if (prog < 0.45) {
           const u = prog / 0.45;
-          dx = w * 0.08 + (gateX - 36 - w * 0.08) * u;
+          dx = w * 0.08 + (gateX - byte.drawW * 0.34 - w * 0.08) * u;
           dy = h * 0.56;
         } else {
           const u = Math.min(1, (prog - 0.45) / 0.55);
-          const endX = p.activeDrone.passed ? w * 0.77 : w * 0.68;
-          dx = gateX + 26 + (endX - (gateX + 26)) * u;
+          const endX = p.activeDrone.passed ? badgeX - 18 : badgeX - 42;
+          dx = byte.emitterX + (endX - byte.emitterX) * u;
           const targetY = h * destLane;
           dy = h * 0.56 + (targetY - h * 0.56) * Math.pow(u, 0.8);
         }
@@ -314,26 +299,29 @@ export const SentinelCanvas: React.FC<SentinelCanvasProps> = ({
 
         // Drone floating telemetry badge (clamped clear of right-side lane boxes)
         const badgeText = `${p.activeDrone.callsign} | AGE ${p.activeDrone.age} | TRN:${p.activeDrone.trained ? 'T' : 'F'} | MNT:${p.activeDrone.mentor ? 'T' : 'F'}`;
-        const badgeCenterX = Math.max(122, Math.min(w * 0.8 - 122, dx));
+        const pillW = Math.min(230, w - 24);
+        const badgeCenterX = Math.max(pillW / 2 + 12, Math.min(badgeX - pillW / 2 - 8, dx));
         ctx.fillStyle = 'rgba(6, 11, 18, 0.92)';
-        ctx.fillRect(badgeCenterX - 114, dy - 42, 228, 22);
+        ctx.fillRect(badgeCenterX - pillW / 2, dy - 42, pillW, 22);
         ctx.strokeStyle = droneColor;
         ctx.lineWidth = 1.2;
-        ctx.strokeRect(badgeCenterX - 114, dy - 42, 228, 22);
+        ctx.strokeRect(badgeCenterX - pillW / 2, dy - 42, pillW, 22);
         ctx.fillStyle = '#E8F4F2';
-        ctx.font = '700 10px "JetBrains Mono", monospace';
+        ctx.font = `700 ${pillW < 210 ? 9 : 10}px "JetBrains Mono", monospace`;
         ctx.textAlign = 'center';
         ctx.fillText(badgeText, badgeCenterX, dy - 27);
 
         // Show failure callout if crashed
         if (prog > 0.88 && !p.activeDrone.passed) {
+          const errW = Math.min(196, w - 24);
+          const errCx = Math.max(errW / 2 + 12, Math.min(w - errW / 2 - 12, dx));
           ctx.fillStyle = 'rgba(255, 42, 95, 0.94)';
-          ctx.fillRect(dx - 98, dy + 18, 196, 24);
+          ctx.fillRect(errCx - errW / 2, dy + 18, errW, 24);
           ctx.fillStyle = '#fff';
-          ctx.font = '700 10px "JetBrains Mono", monospace';
+          ctx.font = `700 ${errW < 180 ? 9 : 10}px "JetBrains Mono", monospace`;
           ctx.fillText(
             `CRASH! GOT ${p.activeDrone.actual} (NEED ${p.activeDrone.expected})`,
-            dx,
+            errCx,
             dy + 34,
           );
         }
@@ -342,15 +330,17 @@ export const SentinelCanvas: React.FC<SentinelCanvasProps> = ({
       // Live branch condition badge from TraceFrame
       if (p.activeFrame && p.activeFrame.branchExpr) {
         const condText = `${p.activeFrame.branchExpr} → ${p.activeFrame.branchTaken ? 'TRUE' : 'FALSE'}`;
+        const condW = Math.min(276, w - 24);
+        const condCx = Math.max(condW / 2 + 12, Math.min(w - condW / 2 - 12, gateX));
         ctx.fillStyle = 'rgba(6, 11, 18, 0.92)';
-        ctx.fillRect(gateX - 135, 44, 270, 26);
+        ctx.fillRect(condCx - condW / 2, 44, condW, 26);
         ctx.strokeStyle = p.activeFrame.branchTaken ? '#B8FF3C' : '#FF9500';
         ctx.lineWidth = 1.5;
-        ctx.strokeRect(gateX - 135, 44, 270, 26);
+        ctx.strokeRect(condCx - condW / 2, 44, condW, 26);
         ctx.fillStyle = p.activeFrame.branchTaken ? '#B8FF3C' : '#FFB84D';
         ctx.font = '700 11px "JetBrains Mono", monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(condText.slice(0, 38), gateX, 61);
+        ctx.fillText(condText.slice(0, 38), condCx, 61);
       }
 
       // Sparks

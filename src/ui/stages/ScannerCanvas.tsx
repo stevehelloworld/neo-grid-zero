@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { TraceFrame } from '../../engine/vm';
+import { drawArenaAtmosphere, drawByteHero } from './drawByteHero';
 
 export interface ScannerCanvasProps {
   mode: 'recon' | 'battle';
@@ -90,19 +91,7 @@ export const ScannerCanvas: React.FC<ScannerCanvasProps> = ({
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      const bg = ctx.createLinearGradient(0, 0, 0, h);
-      bg.addColorStop(0, '#07101d');
-      bg.addColorStop(1, '#040811');
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
-
-      ctx.strokeStyle = 'rgba(0, 240, 255, 0.055)';
-      for (let gx = 0; gx < w; gx += 36) {
-        ctx.beginPath();
-        ctx.moveTo(gx, 0);
-        ctx.lineTo(gx, h);
-        ctx.stroke();
-      }
+      drawArenaAtmosphere(ctx, w, h, p.status === 'error' ? '#FF2A5F' : '#00F0FF');
 
       const locals = p.activeFrame?.locals ?? {};
       const liveIdx =
@@ -124,26 +113,55 @@ export const ScannerCanvas: React.FC<ScannerCanvasProps> = ({
               ? Number(locals.bestRun.value)
               : p.bestRun;
 
-      const chars = p.stream.length ? p.stream.split('') : ['(empty)'];
-      const slotW = Math.min(54, (w * 0.78) / chars.length - 6);
-      const startX = Math.max(40, (w - chars.length * (slotW + 6)) / 2);
-      const baseY = h * 0.62;
+      // Full-body transparent Hero BYTE on left
+      const byteH =
+        w >= 560
+          ? Math.min(320, Math.max(178, h * 0.68))
+          : w >= 430
+            ? Math.min(188, Math.max(138, h * 0.54))
+            : Math.min(138, Math.max(106, h * 0.5));
+      const approxW = byteH * 0.845;
+      const bx = Math.max(approxW * 0.5 + 8, w * 0.15);
+      const by = Math.max(byteH * 0.5 + 34, h * 0.52);
+      const byte = drawByteHero(
+        ctx,
+        byteImgRef.current,
+        bx,
+        by,
+        byteH,
+        t,
+        p.status,
+        w >= 430 ? 'UNIT-01 // SCANNER' : undefined,
+      );
 
-      // Signal Waveform Bars
+      const contentLeft = byte.rightEdge + (w < 430 ? 8 : 14);
+      const contentRight = w - (w < 430 ? 10 : 16);
+      const contentW = Math.max(150, contentRight - contentLeft);
+
+      const chars = p.stream.length ? p.stream.split('') : ['(empty)'];
+      const gap = w < 430 ? 3 : 6;
+      const slotW = Math.min(58, Math.max(12, (contentW * 0.96) / chars.length - gap));
+      const totalBarsW = chars.length * (slotW + gap) - gap;
+      const startX = contentLeft + Math.max(0, (contentW - totalBarsW) / 2);
+      const compactH = h < 300;
+      const baseY = h - (compactH ? 84 : 96);
+      const maxBarH = Math.min(185, Math.max(52, baseY - 62));
+
+      // Signal Waveform Bars across Right Zone
       chars.forEach((ch, idx) => {
-        const sx = startX + idx * (slotW + 6);
+        const sx = startX + idx * (slotW + gap);
         const isO = ch === 'O';
         const isEmpty = ch === '(empty)';
         const isHot = idx === liveIdx && !isEmpty;
-        const barH = isEmpty ? 16 : isO ? 94 : 36;
+        const barH = isEmpty ? 16 : isO ? maxBarH : maxBarH * 0.36;
 
         ctx.fillStyle = isHot
-          ? 'rgba(255, 149, 0, 0.25)'
+          ? 'rgba(255, 149, 0, 0.28)'
           : isEmpty
             ? 'rgba(124, 155, 176, 0.14)'
             : isO
-              ? 'rgba(184, 255, 60, 0.2)'
-              : 'rgba(255, 42, 95, 0.18)';
+              ? 'rgba(184, 255, 60, 0.22)'
+              : 'rgba(255, 42, 95, 0.2)';
         ctx.fillRect(sx, baseY - barH, slotW, barH);
         ctx.strokeStyle = isHot
           ? '#FF9500'
@@ -156,72 +174,70 @@ export const ScannerCanvas: React.FC<ScannerCanvasProps> = ({
         ctx.strokeRect(sx, baseY - barH, slotW, barH);
 
         ctx.fillStyle = isEmpty ? '#7C9BB0' : isO ? '#B8FF3C' : '#FF6B90';
-        ctx.font = `700 ${isEmpty ? 10 : 16}px "JetBrains Mono", monospace`;
+        ctx.font = `700 ${isEmpty ? 10 : Math.min(18, Math.max(11, slotW * 0.45))}px "JetBrains Mono", monospace`;
         ctx.textAlign = 'center';
-        ctx.fillText(ch, sx + slotW / 2, baseY + 20);
+        ctx.fillText(ch, sx + slotW / 2, baseY + (compactH ? 15 : 18));
       });
 
-      // BYTE Scanner Hovering over active cursor
-      const scanIdx = Math.max(0, Math.min(chars.length - 1, liveIdx));
-      const scanX =
-        liveIdx >= 0
-          ? startX + scanIdx * (slotW + 6) + slotW / 2
-          : w * 0.14;
-      const scanY = 92 + Math.sin(t * 3) * 3;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(scanX, scanY, 24, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 240, 255, 0.12)';
-      ctx.fill();
-      ctx.strokeStyle = '#00F0FF';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-      ctx.clip();
-      if (byteImgRef.current) ctx.drawImage(byteImgRef.current, scanX - 24, scanY - 24, 48, 48);
-      ctx.restore();
-
-      if (liveIdx >= 0 && p.stream.length > 0) {
-        ctx.strokeStyle = 'rgba(0, 240, 255, 0.5)';
-        ctx.setLineDash([4, 4]);
+      // Scanner laser beam from BYTE arm to active bar cursor
+      if (liveIdx >= 0 && liveIdx < chars.length && p.stream.length > 0) {
+        const targetBarX = startX + liveIdx * (slotW + gap) + slotW / 2;
+        const targetBarH = chars[liveIdx] === 'O' ? maxBarH : maxBarH * 0.36;
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
         ctx.beginPath();
-        ctx.moveTo(scanX, scanY + 24);
-        ctx.lineTo(scanX, baseY - 96);
+        ctx.moveTo(byte.emitterX, byte.emitterY);
+        ctx.lineTo(targetBarX, baseY - targetBarH / 2);
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
-      // Bottom Counter Gauges (CURRENT vs BEST)
-      const gY = h - 54;
+      // Bottom Counter Gauges (CURRENT vs BEST) aligned cleanly inside Right Zone
+      const gY = h - (compactH ? 48 : 54);
+      const podH = compactH ? 30 : 36;
+      const podGap = 10;
+      const podW = (contentW - podGap) / 2;
       ctx.fillStyle = 'rgba(6, 11, 18, 0.94)';
-      ctx.fillRect(w * 0.14, gY, w * 0.32, 38);
+      ctx.fillRect(contentLeft, gY, podW, podH);
       ctx.strokeStyle = '#00F0FF';
-      ctx.strokeRect(w * 0.14, gY, w * 0.32, 38);
+      ctx.strokeRect(contentLeft, gY, podW, podH);
       ctx.fillStyle = '#00F0FF';
-      ctx.font = '700 12px "JetBrains Mono", monospace';
+      ctx.font = `700 ${podW < 110 ? 9.5 : 12}px "JetBrains Mono", monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText(`CURRENT RUN: ${liveCur}`, w * 0.3, gY + 24);
+      ctx.fillText(
+        podW < 110 ? `CUR: ${liveCur}` : `CURRENT RUN: ${liveCur}`,
+        contentLeft + podW / 2,
+        gY + (compactH ? 19 : 22),
+      );
 
+      const bestX = contentLeft + podW + podGap;
       ctx.fillStyle = 'rgba(6, 11, 18, 0.94)';
-      ctx.fillRect(w * 0.54, gY, w * 0.32, 38);
+      ctx.fillRect(bestX, gY, podW, podH);
       ctx.strokeStyle = '#B8FF3C';
-      ctx.strokeRect(w * 0.54, gY, w * 0.32, 38);
+      ctx.strokeRect(bestX, gY, podW, podH);
       ctx.fillStyle = '#B8FF3C';
-      ctx.fillText(`BEST PEAK: ${liveBest}`, w * 0.7, gY + 24);
+      ctx.fillText(
+        podW < 110 ? `BEST: ${liveBest}` : `BEST PEAK: ${liveBest}`,
+        bestX + podW / 2,
+        gY + (compactH ? 19 : 22),
+      );
 
-      // Boss Shield Dome
-      if (p.mode === 'battle') {
-        const px = w * 0.9;
-        const py = 54;
+      // Boss Shield Dome (desktop)
+      if (p.mode === 'battle' && w >= 560) {
+        const px = w - 36;
+        const py = 38;
         for (let s = 0; s < p.bossShields; s++) {
           const broken = s < p.brokenShields;
           ctx.beginPath();
-          ctx.arc(px, py, 15 + s * 6, 0, Math.PI * 2);
+          ctx.arc(px, py, 11 + s * 4, 0, Math.PI * 2);
           ctx.strokeStyle = broken ? 'rgba(184, 255, 60, 0.4)' : '#FF2A5F';
-          ctx.lineWidth = broken ? 1.2 : 2.2;
+          ctx.lineWidth = broken ? 1.2 : 2;
           ctx.stroke();
         }
         ctx.fillStyle = p.brokenShields >= p.bossShields ? '#B8FF3C' : '#FF2A5F';
-        ctx.font = '700 9px "JetBrains Mono", monospace';
+        ctx.font = '700 8px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
         ctx.fillText('PHANTOM', px, py + 3);
       }
 
