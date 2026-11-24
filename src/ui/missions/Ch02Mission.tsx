@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Check, Flame, ShieldAlert, Zap } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, Check, Flame, ShieldAlert, SlidersHorizontal, Zap } from 'lucide-react';
 import { sound } from '../../engine/audio/synth';
 import { Lang, t, UI_COPY } from '../../engine/i18n/text';
 import { TraceFrame } from '../../engine/vm';
@@ -13,12 +13,14 @@ import {
   evaluateTitanEncounter,
   MarketChaosWave,
 } from '../../game/chapters/ch02Market';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { MarketCanvas } from '../stages/MarketCanvas';
 
 export interface Ch02MissionProps {
@@ -31,8 +33,14 @@ export interface Ch02MissionProps {
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onOpenChapter: (chapterId: number) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosWaveTrigger?: { wave: MarketChaosWave; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'warmup-clear' | 'boss-clear';
 
 export const Ch02Mission: React.FC<Ch02MissionProps> = ({
   lang,
@@ -44,13 +52,19 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
   onCutIn,
   onOpenChapter,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosWaveTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS.find((c) => c.id === 2)!;
+  const brief = MISSION_BRIEFINGS[2];
 
   // Phase 1: Recon state
   const [units, setUnits] = useState(17);
   const [squads, setSquads] = useState(5);
+  const [customNumsOpen, setCustomNumsOpen] = useState(false);
   const [shareGuess, setShareGuess] = useState(progress.reconDone ? '3' : '');
   const [leftGuess, setLeftGuess] = useState(progress.reconDone ? '2' : '');
   const [exactGuess, setExactGuess] = useState(progress.reconDone ? '3.4' : '');
@@ -74,57 +88,47 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
   const [expandedWave, setExpandedWave] = useState<number | null>(null);
   const [chaosNote, setChaosNote] = useState<string | null>(null);
 
-  // Trace playback
+  // Trace & Feedback
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '夜市貨運機器人截斷了零頭！預測整數份額 (/)、餘數 (%) 與小數轉型 (double) 後派送貨物。'
-        : 'Market bots are truncating cargo values! Predict /, %, and exact decimal share before dispatching.',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
-    if (phase === 'recon') {
-      setMira({
-        mood: progress.reconDone ? 'success' : 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '填入這批貨箱的整數商、餘數與精確小數後派送，也可以加減貨箱與小隊數量做實驗。'
-            : 'Predict /, %, and exact decimal share for the cargo crates, or adjust units/squads.',
-      });
-    } else if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? '注意 Java 會先做 int 整數除法，才指定給 double！解開三道夜市鎖。'
-            : 'Remember int / int runs BEFORE assigning to double. Crack all 3 market locks!',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '先過 01 Cargo Splitter，再用 (double) 轉型與複合運算子擊破 02 Truncation Titan！'
-            : 'Clear Cargo Splitter first, then shatter Truncation Titan across 3 test waves.',
-      });
-    } else {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? '霓虹夜市結算精準度 100% 恢復！準備前往第 03 話訊號檔案館。'
-            : 'Night Market ledger calibrated! Ready to launch Ch.03 Signal Archive.',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang, progress.reconDone]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
+
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
 
   useEffect(() => {
     if (!chaosWaveTrigger) return;
+    suppressNextBriefRef.current = true;
+    setPopup(null);
     setEncounter('titan');
     onPhaseChange('battle');
     const res = evaluateTitanEncounter(titanCode, chaosWaveTrigger.wave);
@@ -139,10 +143,12 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
       setChaosNote(
         `GM Chaos (${chaosWaveTrigger.wave.subtotalCents}¢ / ${chaosWaveTrigger.wave.crewSize} crew) PASSED`,
       );
+      setFeedbackBar(null);
       onCutIn({ tag: 'GM CHAOS', title: 'CHAOS ORDER CLEARED!', tone: 'lime' });
     } else {
       sound.hitError();
       setChaosNote('GM Chaos failed. Inspect the wave check below.');
+      setFeedbackBar({ mood: 'danger', text: 'GM Chaos order mismatched!' });
       onCutIn({ tag: 'GM CHAOS', title: 'LEDGER MISMATCH!', tone: 'danger' });
     }
   }, [chaosWaveTrigger]);
@@ -161,27 +167,26 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
     if (!ok) {
       sound.hitError();
       setReconStatus('error');
-      setReconMsg(
+      const msg =
         lang === 'zh-Hant'
-          ? `預測有誤：${units} / ${squads} = ${expPer}，餘數 ${expLeft}，精確小數為 ${expExact.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}。`
-          : `Check again: ${units} / ${squads} = ${expPer}, ${units} % ${squads} = ${expLeft}, exact = ${expExact.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}.`,
-      );
+          ? `再檢查：${units} / ${squads} 整數商為 ${expPer}、餘數 ${expLeft}、小數 ${expExact.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}。`
+          : `Check again: ${units} / ${squads} = ${expPer}, ${units} % ${squads} = ${expLeft}, exact = ${expExact.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}.`;
+      setReconMsg(msg);
+      setFeedbackBar({ mood: 'danger', text: msg });
       return;
     }
 
     sound.shieldBreak();
     setDistributed(true);
     setReconStatus('ok');
-    setReconMsg(
-      lang === 'zh-Hant'
-        ? `貨箱分配正確！每隊 ${expPer} 個、餘數槽 ${expLeft} 個。`
-        : `Cargo dispatched: ${expPer} crates per squad, ${expLeft} left over.`,
-    );
+    setReconMsg('');
+    setFeedbackBar(null);
     onUpdateProgress((p) => ({
       ...p,
       reconDone: true,
       completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
     }));
+    setPopup('recon-clear');
   };
 
   const handleDeployBattle = () => {
@@ -208,18 +213,19 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
         title: res.primaryRun.error ? 'SYNTAX FAULT' : 'PRECISION MISMATCH',
         tone: 'danger',
       });
-      setMira({
+      setFeedbackBar({
         mood: 'danger',
         text: res.primaryRun.error
           ? `Line ${res.primaryRun.error.line}: ${res.primaryRun.error.message}`
           : lang === 'zh-Hant'
-            ? `第 ${res.wavesCleared + 1} 波失敗！確認 (double) 轉型或 += 寫法，並用左側追蹤器對數字。`
-            : `Wave ${res.wavesCleared + 1} failed! Check (double) casting and scrub the trace to verify values.`,
+            ? `第 ${res.wavesCleared + 1} 波失敗！確認 (double) 轉型或 += 寫法。`
+            : `Wave ${res.wavesCleared + 1} failed! Check (double) casting and scrub the trace.`,
       });
       return;
     }
 
     sound.shieldBreak();
+    setFeedbackBar(null);
     const nextCleared = { ...progress.encounterCleared, [encounter]: true };
     const bothCleared = Boolean(nextCleared.splitter && nextCleared.titan);
 
@@ -234,13 +240,7 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
         encounterCleared: nextCleared,
         completedPhases: p.completedPhases.includes('battle') ? p.completedPhases : [...p.completedPhases, 'battle'],
       }));
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? `截斷泰坦擊破！獲得 ${rank} 級評價與 ALU MODULE！`
-            : `TRUNCATION TITAN shattered! Earned ${rank}-Rank and ALU MODULE.`,
-      });
+      setPopup('boss-clear');
     } else {
       onUpdateProgress((p) => ({ ...p, encounterCleared: nextCleared }));
       onCutIn({
@@ -248,6 +248,9 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
         title: encounter === 'splitter' ? 'CARGO SPLITTER VERIFIED!' : 'TITAN SHIELDS SHATTERED!',
         tone: 'cyan',
       });
+      if (encounter === 'splitter') {
+        setPopup('warmup-clear');
+      }
     }
   };
 
@@ -273,6 +276,139 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
       ? battleResult.waveDetails[expandedWave] ?? null
       : null;
 
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      return {
+        stepTag: 'STEP 1 / 1',
+        instruction:
+          lang === 'zh-Hant'
+            ? `預測 ${units} ÷ ${squads} 的整數商、餘數與精確小數`
+            : `Predict /, %, and exact decimal for ${units} ÷ ${squads}`,
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '破解三道夜市運算與轉型鎖' : 'Crack 3 market precedence & cast locks',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      if (encounter === 'splitter') {
+        return {
+          stepTag: 'WARM-UP · 1 / 2',
+          instruction: lang === 'zh-Hant' ? '用 /、% 與 (double) 計算並印出 3 行' : 'Print perSquad (/), leftovers (%), and exact (double)',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'BOSS · 2 / 2',
+        instruction: lang === 'zh-Hant' ? '加上手續費並轉型 (double) 避免分帳截斷' : 'Apply compound ops & cast before dividing to defeat Boss',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, units, squads, encounter, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '帳本解鎖' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'warmup-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '暖身通關' : 'WARM-UP CLEARED',
+        title: t(brief.battle.warmupClearTitle ?? { en: 'Splitter Cleared!', zh: '分配器過關！' }, lang),
+        subtitle:
+          lang === 'zh-Hant'
+            ? `已通過 Cargo Splitter！準備挑戰 02 ${t(brief.battle.bossName, lang)}。`
+            : `Cargo Splitter cleared! Ready to fight ${t(brief.battle.bossName, lang)}.`,
+        primaryLabel: lang === 'zh-Hant' ? `迎戰 Boss：${t(brief.battle.bossName, lang)}` : 'FIGHT BOSS',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setEncounter('titan');
+          setBattleResult(null);
+          setExpandedWave(null);
+          setTraceFrames([]);
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看破關獎勵' : 'VIEW RANK & REWARD',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
+
   return (
     <MissionStageLayout
       stage={
@@ -293,7 +429,8 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
           ? { name: 'TRUNCATION TITAN', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -303,37 +440,52 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <h2 className="deck-heading">
-            {lang === 'zh-Hant' ? '預測貨物分配 ( / · % · double )' : 'Predict Cargo Split ( / · % · double )'}
-          </h2>
-
-          <div className="deck-two-col">
-            <div className="control-tile">
-              <div className="deck-row-between">
-                <div>
-                  <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>CRATES</div>
-                  <strong className="mono" style={{ fontSize: 20 }}>{units}</strong>
-                </div>
-                <div className="stepper-btns">
-                  <button type="button" className="mini-step-btn" onClick={() => { setUnits((u) => Math.max(6, u - 1)); setDistributed(false); }}>−</button>
-                  <button type="button" className="mini-step-btn" onClick={() => { setUnits((u) => Math.min(30, u + 1)); setDistributed(false); }}>+</button>
-                </div>
-              </div>
-            </div>
-
-            <div className="control-tile">
-              <div className="deck-row-between">
-                <div>
-                  <div className="mono" style={{ fontSize: 11, color: 'var(--amber)' }}>SQUADS</div>
-                  <strong className="mono" style={{ fontSize: 20 }}>{squads}</strong>
-                </div>
-                <div className="stepper-btns">
-                  <button type="button" className="mini-step-btn" onClick={() => { setSquads((s) => Math.max(2, s - 1)); setDistributed(false); }}>−</button>
-                  <button type="button" className="mini-step-btn" onClick={() => { setSquads((s) => Math.min(6, s + 1)); setDistributed(false); }}>+</button>
-                </div>
-              </div>
-            </div>
+          <div className="step-done-pill" style={{ borderColor: 'var(--border-subtle)', background: 'rgba(6, 11, 18, 0.72)', color: 'var(--ink-primary)' }}>
+            <span className="mono">
+              {units} crates ÷ {squads} squads
+            </span>
+            <button
+              type="button"
+              className="step-adjust-btn"
+              onClick={() => {
+                sound.click();
+                setCustomNumsOpen((o) => !o);
+              }}
+            >
+              <SlidersHorizontal size={11} style={{ verticalAlign: '-1px', marginRight: 4 }} />
+              {lang === 'zh-Hant' ? '自訂數字' : 'Custom numbers'}
+            </button>
           </div>
+
+          {customNumsOpen && (
+            <div className="deck-two-col">
+              <div className="control-tile">
+                <div className="deck-row-between">
+                  <div>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>CRATES</div>
+                    <strong className="mono" style={{ fontSize: 20 }}>{units}</strong>
+                  </div>
+                  <div className="stepper-btns">
+                    <button type="button" className="mini-step-btn" onClick={() => { setUnits((u) => Math.max(6, u - 1)); setDistributed(false); }}>−</button>
+                    <button type="button" className="mini-step-btn" onClick={() => { setUnits((u) => Math.min(30, u + 1)); setDistributed(false); }}>+</button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="control-tile">
+                <div className="deck-row-between">
+                  <div>
+                    <div className="mono" style={{ fontSize: 11, color: 'var(--amber)' }}>SQUADS</div>
+                    <strong className="mono" style={{ fontSize: 20 }}>{squads}</strong>
+                  </div>
+                  <div className="stepper-btns">
+                    <button type="button" className="mini-step-btn" onClick={() => { setSquads((s) => Math.max(2, s - 1)); setDistributed(false); }}>−</button>
+                    <button type="button" className="mini-step-btn" onClick={() => { setSquads((s) => Math.min(6, s + 1)); setDistributed(false); }}>+</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="deck-three-col">
             <label className="deck-field">
@@ -359,28 +511,28 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
           <div className="deck-actions">
             <button
               type="button"
-              className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`}
+              className="tac-btn primary deck-primary-cta"
               onClick={handleReconDispatch}
             >
               <Zap size={15} />
               <span>{lang === 'zh-Hant' ? '鎖定預測並分配貨物' : 'DISPATCH CARGO'}</span>
             </button>
-
-            {progress.reconDone && (
-              <button
-                type="button"
-                className="tac-btn primary deck-primary-cta"
-                onClick={() => {
-                  sound.click();
-                  setTraceFrames([]);
-                  onPhaseChange('breach');
-                }}
-              >
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
           </div>
+
+          {progress.reconDone && (
+            <button
+              type="button"
+              className="quiet-proceed-link"
+              onClick={() => {
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
+              }}
+            >
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
+            </button>
+          )}
         </div>
       )}
 
@@ -389,8 +541,15 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
           locks={CH02_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '先執行右側 int / int 才會賦值或轉型喔！' : 'Remember: int / int computes BEFORE assignment!',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -406,6 +565,7 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
                 breachCleared: true,
                 completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -431,6 +591,7 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
                 setExpandedWave(null);
                 setTraceFrames([]);
                 setChaosNote(null);
+                setFeedbackBar(null);
               }}
             >
               {splitterCleared && <Check size={12} strokeWidth={2.5} />}
@@ -448,22 +609,13 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
                 setExpandedWave(null);
                 setTraceFrames([]);
                 setChaosNote(null);
+                setFeedbackBar(null);
               }}
             >
               {titanCleared && <Check size={12} strokeWidth={2.5} />}
               <span>02 Truncation Titan</span>
             </button>
           </div>
-
-          <p className="mission-goal">
-            {encounter === 'splitter'
-              ? lang === 'zh-Hant'
-                ? '使用 / 、% 與 (double) 轉型印出 perSquad、leftovers 與 exactPerSquad。'
-                : 'Compute perSquad (/), leftovers (%), and exactPerSquad using a (double) cast, then print all 3.'
-              : lang === 'zh-Hant'
-                ? '加上 serviceFee 與 bonusCredit，精準計算整數分與無截斷的平均分帳。'
-                : 'Apply compound operators (+=, ++) and cast to double before dividing to prevent cent truncation.'}
-          </p>
 
           <CodeTerminal
             value={encounter === 'splitter' ? splitterCode : titanCode}
@@ -599,6 +751,15 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );

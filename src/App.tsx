@@ -33,6 +33,8 @@ export const App: React.FC = () => {
   const [chipsOpen, setChipsOpen] = useState(false);
   const [gmOpen, setGmOpen] = useState(false);
   const [cutIn, setCutIn] = useState<CutInData | null>(null);
+  const [guideSeq, setGuideSeq] = useState(0);
+  const [suppressAutoBriefing, setSuppressAutoBriefing] = useState(false);
 
   const [chaosWaveTrigger, setChaosWaveTrigger] = useState<{ wave: ReactorWaveSpec; seq: number } | null>(null);
   const [chaosMarketTrigger, setChaosMarketTrigger] = useState<{ wave: MarketChaosWave; seq: number } | null>(null);
@@ -93,12 +95,14 @@ export const App: React.FC = () => {
   }, []);
 
   const handlePhaseChange = useCallback((nextPhase: PhaseId) => {
+    setSuppressAutoBriefing(false);
     setActivePhase(nextPhase);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  const openChapter = (chapterId: number, forcedPhase?: PhaseId) => {
+  const openChapter = (chapterId: number, forcedPhase?: PhaseId, fromGm = false) => {
     const ch = CAMPAIGN_CHAPTERS.find((c) => c.id === chapterId);
+    setSuppressAutoBriefing(fromGm);
     setActiveChapterId(chapterId);
     setActivePhase(forcedPhase ?? 'recon');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -114,6 +118,20 @@ export const App: React.FC = () => {
   const activeBattleComplete = activeProgress
     ? Boolean(activeProgress.rank || activeProgress.completedPhases.includes('battle'))
     : false;
+
+  const sharedMissionProps = {
+    lang: state.lang,
+    phase: activePhase,
+    onPhaseChange: handlePhaseChange,
+    onUnlockChip: unlockChip,
+    onCutIn: triggerCutIn,
+    onBackToMap: () => setActiveChapterId(null),
+    skipBriefings: Boolean(state.skipBriefings),
+    onToggleSkipBriefings: (next: boolean) =>
+      setState((p) => ({ ...p, skipBriefings: next })),
+    guideRequestSeq: guideSeq,
+    suppressAutoBriefing,
+  };
 
   return (
     <div className="app-shell">
@@ -137,113 +155,86 @@ export const App: React.FC = () => {
         unlockedChipsCount={state.unlockedChips.length}
         onBackToMap={() => setActiveChapterId(null)}
         onOpenChips={() => setChipsOpen(true)}
+        onOpenGuide={() => setGuideSeq((s) => s + 1)}
         onToggleGm={() => setGmOpen((v) => !v)}
       />
 
       {activeChapterId === null && (
-        <WorldMap state={state} onDeployChapter={(id) => openChapter(id)} />
+        <WorldMap
+          state={state}
+          guideRequestSeq={guideSeq}
+          onMarkWelcomeSeen={() =>
+            setState((p) => (p.seenWelcome ? p : { ...p, seenWelcome: true }))
+          }
+          onDeployChapter={(id) => openChapter(id)}
+        />
       )}
 
       {activeChapterId === 1 && (
         <Ch01Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 1)}
           onUpdateProgress={(up) => updateChapterProgress(1, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
           onOpenChapter={(id) => openChapter(id)}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosWaveTrigger={chaosWaveTrigger}
         />
       )}
 
       {activeChapterId === 2 && (
         <Ch02Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 2)}
           onUpdateProgress={(up) => updateChapterProgress(2, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
           onOpenChapter={(id) => openChapter(id)}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosWaveTrigger={chaosMarketTrigger}
         />
       )}
 
       {activeChapterId === 3 && (
         <Ch03Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 3)}
           onUpdateProgress={(up) => updateChapterProgress(3, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
           onOpenChapter={(id) => openChapter(id)}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosRouteTrigger={chaosRouteTrigger}
         />
       )}
 
       {activeChapterId === 4 && (
         <Ch04Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 4)}
           onUpdateProgress={(up) => updateChapterProgress(4, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
           onOpenChapter={(id) => openChapter(id)}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosDroneTrigger={chaosDroneTrigger}
         />
       )}
 
       {activeChapterId === 5 && (
         <Ch05Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 5)}
           onUpdateProgress={(up) => updateChapterProgress(5, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
           onOpenChapter={(id) => openChapter(id)}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosChargeTrigger={chaosChargeTrigger}
         />
       )}
 
       {activeChapterId === 6 && (
         <Ch06Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 6)}
           onUpdateProgress={(up) => updateChapterProgress(6, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
           onOpenChapter={(id) => openChapter(id)}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosSignalTrigger={chaosSignalTrigger}
         />
       )}
 
       {activeChapterId === 7 && (
         <Ch07Mission
-          lang={state.lang}
-          phase={activePhase}
-          onPhaseChange={handlePhaseChange}
+          {...sharedMissionProps}
           progress={getChapterProgress(state, 7)}
           onUpdateProgress={(up) => updateChapterProgress(7, up)}
-          onUnlockChip={unlockChip}
-          onCutIn={triggerCutIn}
-          onBackToMap={() => setActiveChapterId(null)}
           chaosRowsTrigger={chaosRowsTrigger}
         />
       )}
@@ -263,30 +254,37 @@ export const App: React.FC = () => {
         activePhase={activePhase}
         state={state}
         onJump={(cid, ph) => {
-          openChapter(cid, ph);
+          openChapter(cid, ph, true);
           setGmOpen(false);
         }}
-        onInjectReactorWave={(wave) =>
-          setChaosWaveTrigger((prev) => ({ wave, seq: (prev?.seq ?? 0) + 1 }))
-        }
-        onInjectMarketWave={(wave) =>
-          setChaosMarketTrigger((prev) => ({ wave, seq: (prev?.seq ?? 0) + 1 }))
-        }
-        onInjectRouteString={(route) =>
-          setChaosRouteTrigger((prev) => ({ route, seq: (prev?.seq ?? 0) + 1 }))
-        }
-        onInjectSentinelDrone={(drone) =>
-          setChaosDroneTrigger((prev) => ({ drone, seq: (prev?.seq ?? 0) + 1 }))
-        }
-        onInjectSurgeCharge={(spec) =>
-          setChaosChargeTrigger((prev) => ({ ...spec, seq: (prev?.seq ?? 0) + 1 }))
-        }
-        onInjectScannerStream={(stream) =>
-          setChaosSignalTrigger((prev) => ({ stream, seq: (prev?.seq ?? 0) + 1 }))
-        }
-        onInjectRadarRows={(rows) =>
-          setChaosRowsTrigger((prev) => ({ rows, seq: (prev?.seq ?? 0) + 1 }))
-        }
+        onInjectReactorWave={(wave) => {
+          setSuppressAutoBriefing(true);
+          setChaosWaveTrigger((prev) => ({ wave, seq: (prev?.seq ?? 0) + 1 }));
+        }}
+        onInjectMarketWave={(wave) => {
+          setSuppressAutoBriefing(true);
+          setChaosMarketTrigger((prev) => ({ wave, seq: (prev?.seq ?? 0) + 1 }));
+        }}
+        onInjectRouteString={(route) => {
+          setSuppressAutoBriefing(true);
+          setChaosRouteTrigger((prev) => ({ route, seq: (prev?.seq ?? 0) + 1 }));
+        }}
+        onInjectSentinelDrone={(drone) => {
+          setSuppressAutoBriefing(true);
+          setChaosDroneTrigger((prev) => ({ drone, seq: (prev?.seq ?? 0) + 1 }));
+        }}
+        onInjectSurgeCharge={(spec) => {
+          setSuppressAutoBriefing(true);
+          setChaosChargeTrigger((prev) => ({ ...spec, seq: (prev?.seq ?? 0) + 1 }));
+        }}
+        onInjectScannerStream={(stream) => {
+          setSuppressAutoBriefing(true);
+          setChaosSignalTrigger((prev) => ({ stream, seq: (prev?.seq ?? 0) + 1 }));
+        }}
+        onInjectRadarRows={(rows) => {
+          setSuppressAutoBriefing(true);
+          setChaosRowsTrigger((prev) => ({ rows, seq: (prev?.seq ?? 0) + 1 }));
+        }}
         onImportState={(next) => {
           setState(next);
           setGmOpen(false);

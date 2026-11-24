@@ -14,12 +14,14 @@ import {
   evaluateSurgeBattle,
   expectedRounds,
 } from '../../game/chapters/ch05Surge';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { LoopTowerCanvas } from '../stages/LoopTowerCanvas';
 
 export interface Ch05MissionProps {
@@ -32,8 +34,14 @@ export interface Ch05MissionProps {
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onOpenChapter: (chapterId: number) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosChargeTrigger?: { start: number; gain: number; target: number; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'boss-clear';
 
 export const Ch05Mission: React.FC<Ch05MissionProps> = ({
   lang,
@@ -45,9 +53,14 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
   onCutIn,
   onOpenChapter,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosChargeTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS.find((c) => c.id === 5)!;
+  const brief = MISSION_BRIEFINGS[5];
 
   // Phase 1: Recon state
   const [infiniteSeen, setInfiniteSeen] = useState(progress.reconDone);
@@ -70,50 +83,48 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
   const timersRef = useRef<number[]>([]);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '蓄電高塔迴圈熔斷！先點「測無窮迴圈」目擊負向充電，再按 PULSE (+4) 充至 14。'
-        : 'Surge Tower tripped a breaker! Test the infinite loop first, then pulse-charge from 3 to 14.',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
     return () => timersRef.current.forEach((id) => window.clearTimeout(id));
   }, []);
 
   useEffect(() => {
-    if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? '注意 while 進入條件與邊界終止時機，解開三道電塔鎖！'
-            : 'Watch entry guards and boundary termination across all 3 iteration locks!',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '實作 rounds(start, gain, target)：累積加 gain 到達或超過 target，若一開始已達標回傳 0。'
-            : 'Implement rounds(start, gain, target): return rounds needed to reach target (0 if start >= target).',
-      });
-    } else if (phase === 'debrief') {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? '蓄電高塔迴圈穩定！下一站進入 Ch.06 脈衝掃描站。'
-            : 'Surge Tower stabilized! Advance to Ch.06 Pulse Scanner.',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
+
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
 
   useEffect(() => {
     if (!chaosChargeTrigger) return;
+    suppressNextBriefRef.current = true;
+    setPopup(null);
     onPhaseChange('battle');
     timersRef.current.forEach((id) => window.clearTimeout(id));
     const spec: Ch05TrialSpec = {
@@ -134,10 +145,12 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
     if (tr.passed) {
       sound.shieldBreak();
       setChaosNote(`GM Chaos (${spec.start}, +${spec.gain}, target ${spec.target}) → ${tr.actual} rounds ✓`);
+      setFeedbackBar(null);
       onCutIn({ tag: 'GM CHAOS', title: `${tr.actual} ROUNDS VERIFIED!`, tone: 'lime' });
     } else {
       sound.hitError();
       setChaosNote(`GM Chaos failed: got ${tr.actual ?? 'ERR'}, need ${spec.expected}`);
+      setFeedbackBar({ mood: 'danger', text: `Got ${tr.actual ?? 'ERR'}, expected ${spec.expected}.` });
       onCutIn({ tag: 'GM CHAOS', title: 'LOOP BREACH!', tone: 'danger' });
     }
   }, [chaosChargeTrigger]);
@@ -152,12 +165,12 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
     setPulseKey((k) => k + 1);
     sound.hitError();
     onCutIn({ tag: 'BREAKER TRIPPED', title: 'INFINITE LOOP DETECTED!', tone: 'danger' });
-    setMira({
+    setFeedbackBar({
       mood: 'danger',
       text:
         lang === 'zh-Hant'
-          ? 'charge -= 3 讓數值一路變負、永遠 < 12 觸發熔斷！現在手動 PULSE 充到 14。'
-          : 'charge -= 3 drives charge negative forever, tripping the breaker! Now pulse-charge to 14.',
+          ? 'charge -= 3 讓電量一路變負，while (charge < 12) 永遠不結束所以熔斷！現在按下 PULSE 充能。'
+          : 'charge -= 3 goes negative forever so while (charge < 12) never exits! Now pulse-charge to 14.',
     });
     if (chargeVal >= 14) {
       onUpdateProgress((p) => ({
@@ -165,6 +178,7 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
         reconDone: true,
         completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
       }));
+      setPopup('recon-clear');
     }
   };
 
@@ -178,20 +192,13 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
     if (nextCharge >= 14) {
       sound.shieldBreak();
       setReconStatus('ok');
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? `第 ${nextRound} 輪充到 ${nextCharge} (≥ 14)，while 條件變成 false 結束！`
-            : `Round ${nextRound} hit ${nextCharge} (>= 14), so while (charge < 14) becomes false and stops!`,
-      });
-      if (infiniteSeen) {
-        onUpdateProgress((p) => ({
-          ...p,
-          reconDone: true,
-          completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
-        }));
-      }
+      setFeedbackBar(null);
+      onUpdateProgress((p) => ({
+        ...p,
+        reconDone: true,
+        completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
+      }));
+      setPopup('recon-clear');
     } else {
       sound.beam();
       setReconStatus('idle');
@@ -233,23 +240,18 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
         const rank = computeRank(progress.breachMistakes, progress.battleMistakes);
         sound.missionClear();
         onUnlockChip(meta.chipId);
+        setFeedbackBar(null);
         onCutIn({ tag: 'SEC-05 RESTORED', title: `INFINITE COIL DEFEATED // ${rank}-RANK`, tone: 'lime' });
         onUpdateProgress((p) => ({
           ...p,
           rank,
           completedPhases: p.completedPhases.includes('battle') ? p.completedPhases : [...p.completedPhases, 'battle'],
         }));
-        setMira({
-          mood: 'success',
-          text:
-            lang === 'zh-Hant'
-              ? `9 輪測試全通！解鎖 LOOP THRUSTER 並獲得 ${rank} 級評價！`
-              : `All 9 charge trials stabilized! Earned ${rank}-Rank and LOOP THRUSTER.`,
-        });
+        setPopup('boss-clear');
       } else {
         onUpdateProgress((p) => ({ ...p, battleMistakes: p.battleMistakes + 1 }));
         const fail = res.failedTrial;
-        setMira({
+        setFeedbackBar({
           mood: 'danger',
           text: fail?.run.error
             ? `Line ${fail.run.error.line}: ${fail.run.error.message}`
@@ -273,6 +275,114 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
       : battleResult.wavesCleared
     : progress.rank ? 3 : 0;
 
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      if (!infiniteSeen) {
+        return {
+          stepTag: 'STEP 1 / 2',
+          instruction: lang === 'zh-Hant' ? '先觸發一次無窮迴圈熔斷實驗' : 'Trip the infinite loop breaker once',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'STEP 2 / 2',
+        instruction: lang === 'zh-Hant' ? '按 PULSE (+4) 充能至 14 以上' : 'Pulse-charge from 3 to >= 14',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '追蹤迴圈進入條件與跳出次數' : 'Trace entry guards and loop counts',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      return {
+        stepTag: 'BOSS BATTLE',
+        instruction: lang === 'zh-Hant' ? '實作 rounds(start, gain, target) 累積輪數' : 'Implement rounds(start, gain, target) cleanly',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, infiniteSeen, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '電圈解鎖' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看破關獎勵' : 'VIEW RANK & REWARD',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
+
   return (
     <MissionStageLayout
       stage={
@@ -293,7 +403,8 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
           ? { name: 'INFINITE COIL', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -303,57 +414,68 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <div className="deck-row-between">
-            <h2 className="deck-heading">
-              {lang === 'zh-Hant' ? '脈衝蓄能與無窮迴圈熔斷' : 'Pulse Charge & Breaker Lab'}
-            </h2>
-            <button type="button" className="tac-btn ghost compact-btn" onClick={handleTestInfinite}>
-              <AlertTriangle size={13} />
-              <span>{infiniteSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '測無窮迴圈' : 'Test Loop Bug'}</span>
-            </button>
-          </div>
+          {!infiniteSeen ? (
+            <>
+              <p className="deck-copy">
+                {lang === 'zh-Hant'
+                  ? '先按下方按鈕執行一段壞掉的 while 迴圈，看安全熔斷器為何跳開！'
+                  : 'Fire the corrupted while loop first to see why an infinite loop trips the safety breaker.'}
+              </p>
 
-          <div className="control-tile">
-            <div className="deck-row-between">
-              <div>
-                <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>START 3 · GAIN +4 · TARGET 14</div>
-                <div className="mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
-                  charge = {chargeVal} · rounds = {roundVal}
+              <button type="button" className="tac-btn crimson deck-primary-cta" onClick={handleTestInfinite}>
+                <AlertTriangle size={15} />
+                <span>{lang === 'zh-Hant' ? 'TEST CORRUPTED LOOP（測無窮迴圈）' : 'TEST CORRUPTED LOOP'}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="step-done-pill">
+                <span className="mono">
+                  {lang === 'zh-Hant' ? '✓ 已見證負向無窮迴圈熔斷' : '✓ Infinite loop breaker seen'}
+                </span>
+                <button
+                  type="button"
+                  className="step-adjust-btn"
+                  onClick={() => {
+                    setChargeVal(3);
+                    setRoundVal(0);
+                    setReconStatus('idle');
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+
+              <div className="control-tile">
+                <div className="deck-row-between">
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>START 3 · GAIN +4 · TARGET 14</span>
+                  <strong className="mono" style={{ fontSize: 16 }}>
+                    {chargeVal} / 14 ({roundVal} {lang === 'zh-Hant' ? '輪' : 'rounds'})
+                  </strong>
                 </div>
               </div>
-              <button
-                type="button"
-                className="tac-btn ghost compact-btn"
-                onClick={() => {
-                  setChargeVal(3);
-                  setRoundVal(0);
-                  setReconStatus('idle');
-                }}
-              >
-                Reset
+
+              <button type="button" className="tac-btn primary deck-primary-cta" onClick={handlePulse}>
+                <Zap size={15} />
+                <span>PULSE (+4)</span>
               </button>
-            </div>
-          </div>
+            </>
+          )}
 
-          <div className="deck-row-between">
-            <span className="deck-hint mono">
-              {infiniteSeen ? '✓ Breaker seen' : 'Test loop bug'} · {chargeVal >= 14 ? '✓ Target reached' : 'Pulse to >= 14'}
-            </span>
-          </div>
-
-          <div className="deck-actions">
-            <button type="button" className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`} onClick={handlePulse}>
-              <Zap size={15} />
-              <span>PULSE (+4)</span>
+          {progress.reconDone && (
+            <button
+              type="button"
+              className="quiet-proceed-link"
+              onClick={() => {
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
+              }}
+            >
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
             </button>
-
-            {progress.reconDone && (
-              <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.click(); setTraceFrames([]); onPhaseChange('breach'); }}>
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
 
@@ -362,8 +484,15 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
           locks={CH05_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '檢查迴圈進入條件與最後一次 < / <= 邊界！' : 'Check entry guard and < vs <= boundary!',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -379,6 +508,7 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
                 breachCleared: true,
                 completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -391,12 +521,6 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
 
       {phase === 'battle' && (
         <div className="deck-stack">
-          <p className="mission-goal">
-            {lang === 'zh-Hant'
-              ? '實作 rounds(start, gain, target)：每輪加上 gain，回傳電量達到或超過 target 所需輪數（start >= target 時回傳 0）。'
-              : 'Implement rounds(start, gain, target): return rounds needed adding gain each step to reach or exceed target (0 if start >= target).'}
-          </p>
-
           <CodeTerminal
             value={code}
             starterCode={CH05_STARTER_CODE}
@@ -487,6 +611,15 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );

@@ -12,12 +12,14 @@ import {
   evaluateRadarBattle,
   expectedSweep,
 } from '../../game/chapters/ch07Radar';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { RadarCanvas } from '../stages/RadarCanvas';
 
 export interface Ch07MissionProps {
@@ -29,8 +31,14 @@ export interface Ch07MissionProps {
   onUnlockChip: (chipId: string) => void;
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosRowsTrigger?: { rows: number; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'boss-clear';
 
 export const Ch07Mission: React.FC<Ch07MissionProps> = ({
   lang,
@@ -41,9 +49,14 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
   onUnlockChip,
   onCutIn,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosRowsTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS.find((c) => c.id === 7)!;
+  const brief = MISSION_BRIEFINGS[7];
 
   // Phase 1: Recon
   const [shape, setShape] = useState<'rect' | 'triangle'>('triangle');
@@ -67,15 +80,16 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
   const sweepTimerRef = useRef<number | null>(null);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '切換「三角形」與「矩形」掃描並按下 SWEEP RADAR，觀察內層迴圈邊界如何改變總格數！'
-        : 'Toggle Triangle vs Rectangle and press SWEEP RADAR to compare inner-loop cell visit counts!',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -84,35 +98,32 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
   }, []);
 
   useEffect(() => {
-    if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? '分析巢狀迴圈內外層關係與 n 倍增時的成長倍數，解開三道雷達鎖！'
-            : 'Trace nested loop bounds and quadratic runtime scaling to crack all 3 locks!',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '實作 sweep(rows) 輸出三角形 # 圖樣：記得最末行後面不可多加 \\n，且 sweep(0) 回傳 ""！'
-            : 'Implement sweep(rows): triangular # pattern with no trailing \\n (sweep(0) -> "").',
-      });
-    } else if (phase === 'debrief') {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? 'Act I & II 全 7 話制霸！回到 Aether-9 地圖檢視整座城市點亮的電網吧！'
-            : 'All 7 sectors in Act I & II restored! Return to Aether-9 to view the energized city.',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
+
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
 
   useEffect(() => {
     if (!chaosRowsTrigger) return;
+    suppressNextBriefRef.current = true;
+    setPopup(null);
     onPhaseChange('battle');
     const res = evaluateRadarBattle(code, chaosRowsTrigger.rows);
     const tr = res.trials[0];
@@ -124,10 +135,12 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
     if (tr.passed) {
       sound.shieldBreak();
       setChaosNote(`GM Chaos sweep(${chaosRowsTrigger.rows}) PASSED`);
+      setFeedbackBar(null);
       onCutIn({ tag: 'GM CHAOS', title: `SWEEP(${chaosRowsTrigger.rows}) VERIFIED!`, tone: 'lime' });
     } else {
       sound.hitError();
       setChaosNote(`GM Chaos sweep(${chaosRowsTrigger.rows}) failed! Check bounds or trailing newline.`);
+      setFeedbackBar({ mood: 'danger', text: `sweep(${chaosRowsTrigger.rows}) pattern mismatch.` });
       onCutIn({ tag: 'GM CHAOS', title: 'PATTERN MISMATCH!', tone: 'danger' });
     }
   }, [chaosRowsTrigger]);
@@ -149,13 +162,12 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
         const nextTri = sweptTri || shape === 'triangle';
         setSweptRect(nextRect);
         setSweptTri(nextTri);
-        if (nextRect || nextTri) {
-          onUpdateProgress((p) => ({
-            ...p,
-            reconDone: true,
-            completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
-          }));
-        }
+        onUpdateProgress((p) => ({
+          ...p,
+          reconDone: true,
+          completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
+        }));
+        setPopup('recon-clear');
       }
     }, 55);
   };
@@ -181,12 +193,12 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
         title: focus?.run.error ? 'RUNTIME FAULT' : `SWEEP(${focus?.spec.rows}) MISMATCH`,
         tone: 'danger',
       });
-      setMira({
+      setFeedbackBar({
         mood: 'danger',
         text: focus?.run.error
           ? `Line ${focus.run.error.line}: ${focus.run.error.message}`
           : lang === 'zh-Hant'
-            ? `sweep(${focus?.spec.rows}) 格式不符！檢查最後一行是否多了 \\n，或 sweep(0) 是否回傳 ""。`
+            ? `sweep(${focus?.spec.rows}) 格式不符！檢查最後一行是否多加 \\n 或 sweep(0) 是否回傳 ""。`
             : `sweep(${focus?.spec.rows}) mismatched! Check trailing \\n or sweep(0) -> "".`,
       });
       return;
@@ -195,19 +207,14 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
     const rank = computeRank(progress.breachMistakes, progress.battleMistakes);
     sound.missionClear();
     onUnlockChip(meta.chipId);
+    setFeedbackBar(null);
     onCutIn({ tag: 'ACT II COMPLETE', title: `QUADRATIC HYDRA DEFEATED // ${rank}-RANK`, tone: 'lime' });
     onUpdateProgress((p) => ({
       ...p,
       rank,
       completedPhases: p.completedPhases.includes('battle') ? p.completedPhases : [...p.completedPhases, 'battle'],
     }));
-    setMira({
-      mood: 'success',
-      text:
-        lang === 'zh-Hant'
-          ? `平方九頭蛇擊破！獲得 ${rank} 級評價與 RADAR SWEEP，Act I & II 全制霸！`
-          : `QUADRATIC HYDRA shattered! Earned ${rank}-Rank & RADAR SWEEP. Act I & II complete!`,
-    });
+    setPopup('boss-clear');
   };
 
   const currentFrame = traceFrames[stepIdx] ?? null;
@@ -222,6 +229,107 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
       ? progress.rank ? 3 : 0
       : battleResult.wavesCleared
     : progress.rank ? 3 : 0;
+
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      return {
+        stepTag: 'STEP 1 / 1',
+        instruction: lang === 'zh-Hant' ? '按 SWEEP RADAR 比較巢狀迴圈格數' : 'Press SWEEP RADAR to inspect cell visits',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '計算內外層執行次數並破解三道鎖' : 'Multiply nested bounds & crack 3 locks',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      return {
+        stepTag: 'BOSS BATTLE',
+        instruction: lang === 'zh-Hant' ? '實作 sweep(rows) 三角形圖樣且最末行無 \\n' : 'Implement sweep(rows) with no trailing \\n',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '雷達解鎖' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看最終通關結果' : 'VIEW FINAL RESULT',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
 
   return (
     <MissionStageLayout
@@ -245,7 +353,8 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
           ? { name: 'QUADRATIC HYDRA', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -255,10 +364,6 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <h2 className="deck-heading">
-            {lang === 'zh-Hant' ? '巢狀迴圈矩陣掃描儀' : 'Nested Matrix Simulator'}
-          </h2>
-
           <div className="encounter-tabs">
             <button
               type="button"
@@ -302,19 +407,25 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
             />
           </label>
 
-          <div className="deck-actions">
-            <button type="button" className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`} onClick={handleSweepRecon}>
-              <Radar size={15} />
-              <span>SWEEP RADAR</span>
-            </button>
+          <button type="button" className="tac-btn primary deck-primary-cta" onClick={handleSweepRecon}>
+            <Radar size={15} />
+            <span>SWEEP RADAR</span>
+          </button>
 
-            {progress.reconDone && (
-              <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.click(); setTraceFrames([]); onPhaseChange('breach'); }}>
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
+          {progress.reconDone && (
+            <button
+              type="button"
+              className="quiet-proceed-link"
+              onClick={() => {
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
+              }}
+            >
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
+            </button>
+          )}
         </div>
       )}
 
@@ -323,8 +434,15 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
           locks={CH07_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '把外層迴圈每輪的內層執行次數展開加總或相乘！' : 'Multiply outer count by inner count carefully!',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -340,6 +458,7 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
                 breachCleared: true,
                 completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -352,12 +471,6 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
 
       {phase === 'battle' && (
         <div className="deck-stack">
-          <p className="mission-goal">
-            {lang === 'zh-Hant'
-              ? '實作 sweep(rows)：回傳 rows 行的三角形 #（第 r 列有 r 個 #），列間以 "\\n" 分隔且末行不可加 "\\n"；rows == 0 回傳 ""。'
-              : 'Implement sweep(rows): return rows lines of triangular # joined by "\\n" with NO trailing newline (sweep(0) -> "").'}
-          </p>
-
           <CodeTerminal
             value={code}
             starterCode={CH07_STARTER_CODE}
@@ -445,6 +558,15 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Check, Cpu, Globe, Sliders, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Check, Cpu, Globe, HelpCircle, Sliders, Volume2, VolumeX } from 'lucide-react';
 import { sound } from '../engine/audio/synth';
 import { Lang, t, UI_COPY } from '../engine/i18n/text';
 import { CAMPAIGN_CHAPTERS } from '../game/campaignData';
@@ -19,6 +19,7 @@ export interface TopBarProps {
   unlockedChipsCount: number;
   onBackToMap: () => void;
   onOpenChips: () => void;
+  onOpenGuide: () => void;
   onToggleGm: () => void;
 }
 
@@ -35,6 +36,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   unlockedChipsCount,
   onBackToMap,
   onOpenChips,
+  onOpenGuide,
   onToggleGm,
 }) => {
   const activeChapter = activeChapterId
@@ -123,7 +125,21 @@ export const TopBar: React.FC<TopBarProps> = ({
       <div className="topbar-right">
         <button
           type="button"
-          className="hud-btn"
+          className="hud-btn hud-guide-btn"
+          onClick={() => {
+            sound.click();
+            onOpenGuide();
+          }}
+          aria-label={lang === 'zh-Hant' ? '任務操作指南' : 'How to play'}
+          title={lang === 'zh-Hant' ? '現在該做什麼？' : 'How to play / Current goal'}
+        >
+          <HelpCircle size={15} />
+          <span className="hud-label-desktop">{lang === 'zh-Hant' ? '指南' : 'Guide'}</span>
+        </button>
+
+        <button
+          type="button"
+          className="hud-btn quiet-util"
           onClick={() => {
             sound.click();
             onOpenChips();
@@ -137,7 +153,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <button
           type="button"
-          className="hud-btn"
+          className="hud-btn quiet-util"
           onClick={() => {
             sound.click();
             onToggleLang();
@@ -151,7 +167,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <button
           type="button"
-          className="hud-btn hud-icon-only"
+          className="hud-btn hud-icon-only quiet-util"
           onClick={onToggleMute}
           aria-label="Toggle sound effects"
           title={muted ? t(UI_COPY.sfxOff, lang) : t(UI_COPY.sfxOn, lang)}
@@ -161,7 +177,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         <button
           type="button"
-          className="hud-btn hud-gm-btn"
+          className="hud-btn hud-gm-btn quiet-util"
           onClick={() => {
             sound.click();
             onToggleGm();

@@ -1,7 +1,7 @@
 import React from 'react';
+import { HelpCircle } from 'lucide-react';
 import { Lang } from '../engine/i18n/text';
 import { TraceFrame } from '../engine/vm';
-import { MiraComms } from './MiraComms';
 import { TraceInspector } from './TraceInspector';
 
 export interface BossHudInfo {
@@ -10,10 +10,22 @@ export interface BossHudInfo {
   broken: number;
 }
 
+export interface StepBannerInfo {
+  stepTag: string;
+  instruction: string;
+  onOpenGuide?: () => void;
+}
+
+export interface ReactiveFeedbackInfo {
+  mood: 'danger' | 'success' | 'alert';
+  text: string;
+}
+
 export interface MissionStageLayoutProps {
   stage: React.ReactNode;
   bossHud?: BossHudInfo;
-  mira: { mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string };
+  feedbackBar?: ReactiveFeedbackInfo | null;
+  stepBanner?: StepBannerInfo;
   traceFrames: TraceFrame[];
   stepIdx: number;
   onStepChange: (nextIndex: number) => void;
@@ -26,7 +38,8 @@ export interface MissionStageLayoutProps {
 export const MissionStageLayout: React.FC<MissionStageLayoutProps> = ({
   stage,
   bossHud,
-  mira,
+  feedbackBar = null,
+  stepBanner,
   traceFrames,
   stepIdx,
   onStepChange,
@@ -55,8 +68,14 @@ export const MissionStageLayout: React.FC<MissionStageLayoutProps> = ({
               </div>
             )}
           </div>
-          <MiraComms mood={mira.mood} message={mira.text} lang={lang} docked />
         </div>
+
+        {feedbackBar && (
+          <div className={`reactive-feedback-bar ${feedbackBar.mood}`} role="status">
+            <span className="reactive-badge mono">MIRA</span>
+            <span>{feedbackBar.text}</span>
+          </div>
+        )}
 
         <TraceInspector
           frames={traceFrames}
@@ -69,7 +88,31 @@ export const MissionStageLayout: React.FC<MissionStageLayoutProps> = ({
       </div>
 
       <section className="mission-deck-col" aria-label="Mission controls">
-        <div className="action-deck">{children}</div>
+        <div className="action-deck">
+          {stepBanner && (
+            <div className="step-beacon">
+              <div className="step-beacon-main">
+                <span className="step-dot" aria-hidden="true" />
+                <div className="step-beacon-copy">
+                  <span className="step-beacon-tag mono">{stepBanner.stepTag}</span>
+                  <span className="step-beacon-text">{stepBanner.instruction}</span>
+                </div>
+              </div>
+              {stepBanner.onOpenGuide && (
+                <button
+                  type="button"
+                  className="step-guide-btn"
+                  onClick={stepBanner.onOpenGuide}
+                  aria-label={lang === 'zh-Hant' ? '查看目前步驟說明' : 'Show step guide'}
+                  title={lang === 'zh-Hant' ? '查看本關說明' : 'Mission Briefing'}
+                >
+                  <HelpCircle size={14} />
+                </button>
+              )}
+            </div>
+          )}
+          {children}
+        </div>
       </section>
     </main>
   );

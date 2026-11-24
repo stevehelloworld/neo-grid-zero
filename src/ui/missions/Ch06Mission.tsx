@@ -13,12 +13,14 @@ import {
   evaluateScannerBattle,
   expectedLongestRun,
 } from '../../game/chapters/ch06Scanner';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { ScannerCanvas } from '../stages/ScannerCanvas';
 
 export interface Ch06MissionProps {
@@ -31,8 +33,14 @@ export interface Ch06MissionProps {
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onOpenChapter: (chapterId: number) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosSignalTrigger?: { stream: string; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'boss-clear';
 
 const RECON_STREAM = 'OOXOOOXO';
 
@@ -46,9 +54,14 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
   onCutIn,
   onOpenChapter,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosSignalTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS.find((c) => c.id === 6)!;
+  const brief = MISSION_BRIEFINGS[6];
 
   // Phase 1: Recon pulse walker
   const [cursorIdx, setCursorIdx] = useState(progress.reconDone ? RECON_STREAM.length - 1 : -1);
@@ -71,50 +84,48 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
   const timersRef = useRef<number[]>([]);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '逐格步進掃描 "OOXOOOXO"，觀察遇 X 時 current 歸零但 best 保留最高峰的節奏，再鎖定最佳值！'
-        : 'Step through "OOXOOOXO" to watch current reset on X while best preserves the peak streak!',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
     return () => timersRef.current.forEach((id) => window.clearTimeout(id));
   }, []);
 
   useEffect(() => {
-    if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? '四道演算法鎖涵蓋累積極值、雙計數器與數字拆解，小心負數陷阱！'
-            : 'Four algorithm locks test extrema, streak tracking, and digit peeling!',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '實作 longestRun(readings)：單次掃描維護 cur 與 best，記得安全處理空字串 ""！'
-            : 'Implement longestRun(readings): update cur & best in one pass and handle "" safely.',
-      });
-    } else if (phase === 'debrief') {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? '雜訊幻影清除完成！準備進入 Act II 壓軸戰 Ch.07 矩陣掃描雷達。'
-            : 'Pulse Scanner online! Ready for the Act II finale: Ch.07 Radar Matrix.',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
+
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
 
   useEffect(() => {
     if (!chaosSignalTrigger) return;
+    suppressNextBriefRef.current = true;
+    setPopup(null);
     onPhaseChange('battle');
     timersRef.current.forEach((id) => window.clearTimeout(id));
     const clean = chaosSignalTrigger.stream.toUpperCase().replace(/[^OX]/g, '');
@@ -133,10 +144,12 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
     if (tr.passed) {
       sound.shieldBreak();
       setChaosNote(`GM Chaos "${clean}" → ${tr.actual} ✓`);
+      setFeedbackBar(null);
       onCutIn({ tag: 'GM CHAOS', title: `STREAK ${tr.actual} VERIFIED!`, tone: 'lime' });
     } else {
       sound.hitError();
       setChaosNote(`GM Chaos "${clean}" failed: got ${tr.actual ?? 'ERR'}, need ${spec.expected}`);
+      setFeedbackBar({ mood: 'danger', text: `Stream "${clean}" returned ${tr.actual ?? 'ERR'}, expected ${spec.expected}.` });
       onCutIn({ tag: 'GM CHAOS', title: 'SCANNER MISMATCH!', tone: 'danger' });
     }
   }, [chaosSignalTrigger]);
@@ -155,32 +168,27 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
   };
 
   const handleVerifyRecon = () => {
-    if (cursorIdx < RECON_STREAM.length - 1 || peakGuess.trim() !== '3') {
+    if (peakGuess.trim() !== '3') {
       sound.hitError();
       setReconStatus('error');
-      setMira({
+      setFeedbackBar({
         mood: 'danger',
         text:
           lang === 'zh-Hant'
-            ? '請先按 STEP PULSE 掃完整段訊號，再填入最長連續 O 的長度 (3)。'
-            : 'Step through the entire signal stream first, then enter the peak consecutive O streak (3).',
+            ? '再看一下左圖掃描紀錄中的 Best Peak（最長連續 O 的長度）是多少！'
+            : 'Check BEST PEAK on the scanner canvas—what was the longest unbroken O streak?',
       });
       return;
     }
     sound.breachSuccess();
     setReconStatus('ok');
+    setFeedbackBar(null);
     onUpdateProgress((p) => ({
       ...p,
       reconDone: true,
       completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
     }));
-    setMira({
-      mood: 'success',
-      text:
-        lang === 'zh-Hant'
-          ? '雙計數器節奏掌握！遇到 X 歸零 cur 同時守住 best。進入突入！'
-          : 'Dual-tracker verified! Reset current on X while protecting best.',
-    });
+    setPopup('recon-clear');
   };
 
   const handleDeployScanner = () => {
@@ -217,23 +225,18 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
         const rank = computeRank(progress.breachMistakes, progress.battleMistakes);
         sound.missionClear();
         onUnlockChip(meta.chipId);
+        setFeedbackBar(null);
         onCutIn({ tag: 'SEC-06 RESTORED', title: `NOISE PHANTOM DEFEATED // ${rank}-RANK`, tone: 'lime' });
         onUpdateProgress((p) => ({
           ...p,
           rank,
           completedPhases: p.completedPhases.includes('battle') ? p.completedPhases : [...p.completedPhases, 'battle'],
         }));
-        setMira({
-          mood: 'success',
-          text:
-            lang === 'zh-Hant'
-              ? `9 條訊號全數解碼！獲得 ${rank} 級評價與 SCANNER AI！`
-              : `All 9 streams decoded cleanly! Earned ${rank}-Rank and SCANNER AI.`,
-        });
+        setPopup('boss-clear');
       } else {
         onUpdateProgress((p) => ({ ...p, battleMistakes: p.battleMistakes + 1 }));
         const fail = res.failedTrial;
-        setMira({
+        setFeedbackBar({
           mood: 'danger',
           text: fail?.run.error
             ? `Line ${fail.run.error.line}: ${fail.run.error.message}`
@@ -257,6 +260,116 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
       : battleResult.wavesCleared
     : progress.rank ? 3 : 0;
 
+  const scanFinished = cursorIdx >= RECON_STREAM.length - 1;
+
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      if (!scanFinished) {
+        return {
+          stepTag: 'STEP 1 / 2',
+          instruction: lang === 'zh-Hant' ? '按 STEP PULSE 逐格掃完 8 個脈衝訊號' : 'Click STEP PULSE to scan all 8 signals',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'STEP 2 / 2',
+        instruction: lang === 'zh-Hant' ? '輸入過程出現的最長連續 O 長度' : 'Enter the longest consecutive O streak',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '小心全負數 traps 破解 4 道演算法鎖' : 'Watch negative extrema & crack 4 locks',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      return {
+        stepTag: 'BOSS BATTLE',
+        instruction: lang === 'zh-Hant' ? '實作 longestRun(readings) 並部署程式' : 'Implement longestRun(readings) & deploy',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, scanFinished, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '掃描核心解鎖' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看破關獎勵' : 'VIEW RANK & REWARD',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
+
   return (
     <MissionStageLayout
       stage={
@@ -277,7 +390,8 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
           ? { name: 'NOISE PHANTOM', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -287,59 +401,66 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <div className="deck-row-between">
-            <h2 className="deck-heading">
-              {lang === 'zh-Hant' ? '即時雙計數器掃描' : 'Live Streak Scanner'}
-            </h2>
+          {!scanFinished ? (
             <button
               type="button"
-              className="tac-btn ghost compact-btn"
+              className="tac-btn primary deck-primary-cta"
+              onClick={handleStepRecon}
+            >
+              <StepForward size={15} />
+              <span>STEP PULSE ({cursorIdx + 1} / {RECON_STREAM.length})</span>
+            </button>
+          ) : (
+            <>
+              <div className="step-done-pill">
+                <span className="mono">✓ {RECON_STREAM} scanned · Best Peak ready</span>
+                <button
+                  type="button"
+                  className="step-adjust-btn"
+                  onClick={() => {
+                    setCursorIdx(-1);
+                    setCurRun(0);
+                    setBestRun(0);
+                    setReconStatus('idle');
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+
+              <label className="deck-field">
+                <span className="deck-field-label mono" style={{ color: 'var(--lime)' }}>
+                  {lang === 'zh-Hant' ? '輸入最長連續 O 的長度 (Best Peak)：' : 'Enter longest consecutive O streak:'}
+                </span>
+                <input
+                  type="number"
+                  className="deck-input mono"
+                  value={peakGuess}
+                  onChange={(e) => setPeakGuess(e.target.value)}
+                  placeholder="?"
+                />
+              </label>
+
+              <button type="button" className="tac-btn primary deck-primary-cta" onClick={handleVerifyRecon}>
+                <span>{lang === 'zh-Hant' ? '鎖定答案' : 'LOCK ANSWER'}</span>
+              </button>
+            </>
+          )}
+
+          {progress.reconDone && (
+            <button
+              type="button"
+              className="quiet-proceed-link"
               onClick={() => {
-                setCursorIdx(-1);
-                setCurRun(0);
-                setBestRun(0);
-                setReconStatus('idle');
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
               }}
             >
-              Reset
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
             </button>
-          </div>
-
-          <button
-            type="button"
-            className="tac-btn primary deck-primary-cta"
-            disabled={cursorIdx >= RECON_STREAM.length - 1}
-            onClick={handleStepRecon}
-          >
-            <StepForward size={15} />
-            <span>STEP PULSE ({cursorIdx + 1} / {RECON_STREAM.length})</span>
-          </button>
-
-          <label className="deck-field">
-            <span className="deck-field-label mono" style={{ color: 'var(--lime)' }}>
-              {lang === 'zh-Hant' ? '掃描後輸入最長連續 O 長度 (Best Peak)' : 'Final longest consecutive O streak'}
-            </span>
-            <input
-              type="number"
-              className="deck-input mono"
-              value={peakGuess}
-              onChange={(e) => setPeakGuess(e.target.value)}
-              placeholder="?"
-            />
-          </label>
-
-          <div className="deck-actions">
-            <button type="button" className={`tac-btn ${progress.reconDone ? 'ghost' : 'amber'} deck-primary-cta`} onClick={handleVerifyRecon}>
-              <span>{lang === 'zh-Hant' ? '鎖定最佳紀錄' : 'LOCK PEAK STREAK'}</span>
-            </button>
-
-            {progress.reconDone && (
-              <button type="button" className="tac-btn primary deck-primary-cta" onClick={() => { sound.click(); setTraceFrames([]); onPhaseChange('breach'); }}>
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
 
@@ -348,8 +469,15 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
           locks={CH06_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '小心負數極值起始與連續次數歸零的時機！' : 'Watch negative-number initialization and reset timing!',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -365,6 +493,7 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
                 breachCleared: true,
                 completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -377,12 +506,6 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
 
       {phase === 'battle' && (
         <div className="deck-stack">
-          <p className="mission-goal">
-            {lang === 'zh-Hant'
-              ? '實作 longestRun(readings)：回傳連續出現最多次 "O" 的長度（支援 substring(...).equals("O") 或 charAt(i) == \'O\'），空字串回傳 0。'
-              : 'Implement longestRun(readings): return the longest consecutive "O" streak (handle "" safely).'}
-          </p>
-
           <CodeTerminal
             value={code}
             starterCode={CH06_STARTER_CODE}
@@ -434,7 +557,7 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
                         setAutoPlaySeq((s) => s + 1);
                       }}
                     >
-                      <span>W{tr.waveIndex + 1} · "{tr.spec.stream}"</span>
+                      <span>W{tr.waveIndex + 1} · &quot;{tr.spec.stream}&quot;</span>
                       <span>{tr.passed ? `✓ ${tr.actual}` : `✕ ${tr.actual ?? 'ERR'}/${tr.spec.expected}`}</span>
                     </button>
                   );
@@ -473,6 +596,15 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );

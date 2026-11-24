@@ -1,16 +1,24 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Lock, Play } from 'lucide-react';
 import { sound } from '../engine/audio/synth';
 import { Lang, t, UI_COPY } from '../engine/i18n/text';
 import { ACT_META, CAMPAIGN_CHAPTERS } from '../game/campaignData';
 import { CampaignState, getChapterProgress } from '../game/store';
+import { MissionPopup } from './MissionPopup';
 
 export interface WorldMapProps {
   state: CampaignState;
+  guideRequestSeq: number;
+  onMarkWelcomeSeen: () => void;
   onDeployChapter: (chapterId: number) => void;
 }
 
-export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) => {
+export const WorldMap: React.FC<WorldMapProps> = ({
+  state,
+  guideRequestSeq,
+  onMarkWelcomeSeen,
+  onDeployChapter,
+}) => {
   const playableChapters = useMemo(
     () => CAMPAIGN_CHAPTERS.filter((c) => c.playable),
     [],
@@ -27,8 +35,14 @@ export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) =>
   const [hoveredId, setHoveredId] = useState<number | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [cityImgErr, setCityImgErr] = useState(false);
-  const [miraImgErr, setMiraImgErr] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(() => !state.seenWelcome);
   const lang: Lang = state.lang;
+
+  useEffect(() => {
+    if (guideRequestSeq > 0) {
+      setWelcomeOpen(true);
+    }
+  }, [guideRequestSeq]);
 
   const visibleChapters = showArchive ? CAMPAIGN_CHAPTERS : playableChapters;
 
@@ -58,23 +72,6 @@ export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) =>
     sound.click();
     setSelectedId(chapterId);
   };
-
-  const miraSrc =
-    selected.playable && !isCleared
-      ? './assets/mira-alert.png'
-      : './assets/mira-neutral.png';
-
-  const miraLine = selected.playable
-    ? isCleared
-      ? lang === 'zh-Hant'
-        ? `${selected.code} 已通關 (${progress.rank})，可隨時重玩或用 Shift+G 加題。`
-        : `${selected.code} cleared (${progress.rank}-Rank). Replay or inject custom waves.`
-      : lang === 'zh-Hant'
-        ? `偵測到 ${selected.code} 異常，按下「出擊」立刻派 BYTE 切入！`
-        : `${selected.code} breach active. Hit PLAY to deploy BYTE!`
-    : lang === 'zh-Hant'
-      ? `${selected.code} 為 Act III–V 後續章節預覽，先攻克 01–07 吧！`
-      : `${selected.code} opens in Act III–V. Sectors 01–07 are ready to play.`;
 
   return (
     <main className="world-stage">
@@ -135,9 +132,7 @@ export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) =>
           }}
         >
           <Lock size={12} />
-          <span>
-            {lang === 'zh-Hant' ? 'Act III–V (08–15)' : 'Act III–V (08–15)'}
-          </span>
+          <span>Act III–V (08–15)</span>
         </button>
 
         <div className="world-corner-pill mono">
@@ -194,7 +189,7 @@ export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) =>
         );
       })}
 
-      {/* Floating Bottom Mission Launch Dock */}
+      {/* Compact Floating Bottom Launch Dock */}
       <section className="map-float-dock" aria-label="Selected sector">
         <div className="dock-left">
           <div className="dock-nav">
@@ -226,25 +221,8 @@ export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) =>
                 <span className="dock-rank-badge mono">RANK {progress.rank}</span>
               )}
             </div>
-            <p className="dock-sub">
-              {t(selected.topic, lang)} · Boss: {t(selected.bossName, lang)}
-            </p>
+            <p className="dock-sub">{t(selected.topic, lang)}</p>
           </div>
-        </div>
-
-        <div className="dock-mira">
-          <div className="dock-mira-avatar">
-            {!miraImgErr ? (
-              <img
-                src={miraSrc}
-                alt="Mira"
-                onError={() => setMiraImgErr(true)}
-              />
-            ) : (
-              <span className="mono">M</span>
-            )}
-          </div>
-          <p className="dock-mira-line">{miraLine}</p>
         </div>
 
         <div className="dock-cta">
@@ -283,6 +261,39 @@ export const WorldMap: React.FC<WorldMapProps> = ({ state, onDeployChapter }) =>
           )}
         </div>
       </section>
+
+      <MissionPopup
+        open={welcomeOpen}
+        variant="welcome"
+        lang={lang}
+        badge="AETHER-9 // AP CSA JAVA"
+        title="NEO-GRID ZERO"
+        subtitle={
+          lang === 'zh-Hant'
+            ? '都市電網遭程式碼異常入侵。只要跟著步驟寫出正確 Java 邏輯，就能一步步修復這座城市。'
+            : "Aether-9's power grid is corrupted. Fix Java bugs across 7 sectors step by step to restore the city."
+        }
+        steps={
+          lang === 'zh-Hant'
+            ? ['現場診斷異常', '破解邏輯鎖', '寫程式擊敗 Boss']
+            : ['Diagnose Anomaly', 'Crack Logic Locks', 'Defeat Sector Boss']
+        }
+        primaryLabel={
+          lang === 'zh-Hant'
+            ? `開始第 ${String(recommendedId).padStart(2, '0')} 關`
+            : `START CH.${String(recommendedId).padStart(2, '0')}`
+        }
+        secondaryLabel={lang === 'zh-Hant' ? '先逛地圖' : 'Browse City Map'}
+        onPrimary={() => {
+          setWelcomeOpen(false);
+          onMarkWelcomeSeen();
+          onDeployChapter(recommendedId);
+        }}
+        onSecondary={() => {
+          setWelcomeOpen(false);
+          onMarkWelcomeSeen();
+        }}
+      />
     </main>
   );
 };

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, Flame, ShieldAlert, Zap } from 'lucide-react';
 import { sound } from '../../engine/audio/synth';
 import { Lang, t, UI_COPY } from '../../engine/i18n/text';
@@ -12,12 +12,14 @@ import {
   evaluateSwapEncounter,
   ReactorWaveSpec,
 } from '../../game/chapters/ch01Reactor';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { Ch01EncounterResult, PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { ReactorCanvas } from '../stages/ReactorCanvas';
 
 export interface Ch01MissionProps {
@@ -30,8 +32,14 @@ export interface Ch01MissionProps {
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onOpenChapter: (chapterId: number) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosWaveTrigger?: { wave: ReactorWaveSpec; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'warmup-clear' | 'boss-clear';
 
 export const Ch01Mission: React.FC<Ch01MissionProps> = ({
   lang,
@@ -43,14 +51,20 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
   onCutIn,
   onOpenChapter,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosWaveTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS[0];
+  const brief = MISSION_BRIEFINGS[1];
 
   // Phase 1: Recon state
-  const [energy, setEnergy] = useState(100);
-  const [used, setUsed] = useState(35);
+  const [energy, setEnergy] = useState(progress.reconDone ? 120 : 100);
+  const [used, setUsed] = useState(progress.reconDone ? 45 : 35);
   const [stored, setStored] = useState(progress.reconDone ? 75 : 65);
+  const [adjustingSliders, setAdjustingSliders] = useState(false);
   const [predictInput, setPredictInput] = useState(progress.reconDone ? '75' : '');
   const [reconStatus, setReconStatus] = useState<'idle' | 'ok' | 'error' | 'stale'>(
     progress.reconDone ? 'ok' : 'idle',
@@ -71,55 +85,44 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
   const [expandedWave, setExpandedWave] = useState<number | null>(null);
   const [chaosNote, setChaosNote] = useState<string | null>(null);
 
-  // Shared Trace Playback state
+  // Trace & Reactive Feedback
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '反應爐儀表顯示剩餘 65 MW，但實體感測器正在漂移！將 Supply 調為 120、Usage 調為 45，觀察讀數落差。'
-        : 'Dashboard reads 65 MW even while sensors drift. Set Supply = 120 and Usage = 45, then predict and execute!',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
-    if (phase === 'recon') {
-      setMira({
-        mood: progress.reconDone ? 'success' : 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '把 Supply 調成 120、Usage 調成 45（或按 A/D、W/S），觀察 Memory Core 是否自動更新，再輸入預測執行！'
-            : 'Tune Supply = 120 and Usage = 45 (keys A/D, W/S). See if Memory Core moves on its own, then predict and execute.',
-      });
-    } else if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? '逐行追蹤每個 = 指定運算發生的時機，解開兩道防火牆鎖。'
-            : 'Trace each assignment step by step to crack both reactor locks.',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '先通過 01 Channel Swap 暖身，再迎戰 02 Overload Core 守護 3 波變化輸入！'
-            : 'Clear Channel Swap first, then defeat Overload Core across 3 live input waves.',
-      });
-    } else {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? 'Aether-9 中央反應爐已重新上線！可從下方追蹤器重播每一步記憶體狀態。'
-            : 'Aether-9 core stabilized! Scrub the trace below to review every register snapshot.',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang, progress.reconDone]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
 
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
+
+  // Keyboard tuning shortcuts in Recon (A/D for energy, W/S for used)
   useEffect(() => {
     if (phase !== 'recon') return;
     const onKey = (e: KeyboardEvent) => {
@@ -134,8 +137,17 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [phase]);
 
+  const calibrated = energy === 120 && used === 45;
+  useEffect(() => {
+    if (calibrated && adjustingSliders) {
+      setAdjustingSliders(false);
+    }
+  }, [calibrated, adjustingSliders]);
+
   useEffect(() => {
     if (!chaosWaveTrigger) return;
+    suppressNextBriefRef.current = true;
+    setPopup(null);
     setEncounter('reactor');
     onPhaseChange('battle');
     const res = evaluateReactorEncounter(reactorCode, chaosWaveTrigger.wave);
@@ -152,6 +164,7 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
           ? `GM 干擾波通過 (${chaosWaveTrigger.wave.initEnergy}/${chaosWaveTrigger.wave.initUsed} → ${chaosWaveTrigger.wave.updEnergy}/${chaosWaveTrigger.wave.updUsed})`
           : `GM Chaos passed (${chaosWaveTrigger.wave.initEnergy}/${chaosWaveTrigger.wave.initUsed} → ${chaosWaveTrigger.wave.updEnergy}/${chaosWaveTrigger.wave.updUsed})`,
       );
+      setFeedbackBar(null);
       onCutIn({ tag: 'GM CHAOS', title: 'CHAOS WAVE DEFLECTED!', tone: 'lime' });
     } else {
       sound.hitError();
@@ -160,6 +173,10 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
           ? 'GM 干擾波擊穿防線！請檢視下方失敗原因。'
           : 'GM Chaos breached your code! Inspect the wave check below.',
       );
+      setFeedbackBar({
+        mood: 'danger',
+        text: lang === 'zh-Hant' ? '干擾波擊穿防線！檢查下方波動檢查。' : 'GM Chaos breached your code!',
+      });
       onCutIn({ tag: 'GM CHAOS', title: 'CHAOS BREACH DETECTED', tone: 'danger' });
     }
   }, [chaosWaveTrigger]);
@@ -167,46 +184,26 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
   const currentFrame = traceFrames[stepIdx] ?? null;
 
   const handleReconExecute = () => {
-    const calibrated = energy === 120 && used === 45;
     const predOk = predictInput.trim() === '75';
     setPulseKey((k) => k + 1);
 
-    if (!calibrated) {
-      sound.hitError();
-      setReconStatus('error');
-      setReconFeedback(
-        lang === 'zh-Hant'
-          ? '請先將 Supply 設為 120、Usage 設為 45，製造並觀察數值落差。'
-          : 'Calibrate Supply = 120 and Usage = 45 first to observe the mismatch.',
-      );
-      return;
-    }
     if (!predOk) {
       sound.hitError();
       setReconStatus('error');
-      setReconFeedback(
+      const msg =
         lang === 'zh-Hant'
-          ? '預測有誤。執行 remaining = energy - used; 時，120 - 45 會是多少？'
-          : 'Prediction mismatch. When remaining = energy - used; runs, what is 120 - 45?',
-      );
+          ? '預測不對喔！執行 remaining = energy - used; 時，120 - 45 是多少？'
+          : 'Not quite! When remaining = energy - used; executes, what is 120 - 45?';
+      setReconFeedback(msg);
+      setFeedbackBar({ mood: 'danger', text: msg });
       return;
     }
 
     sound.shieldBreak();
     setStored(75);
     setReconStatus('ok');
-    setReconFeedback(
-      lang === 'zh-Hant'
-        ? '同步成功！= 會立刻計算右側並存入記憶體，修改舊變數不會回頭重算。'
-        : 'Sync restored! Assignment computes 120 - 45 now and overwrites remaining with 75.',
-    );
-    setMira({
-      mood: 'success',
-      text:
-        lang === 'zh-Hant'
-          ? '變數存的是「執行當下的快照」，不是自動連動公式。可以突入防火牆了！'
-          : 'Variables store snapshots, not live formulas. Ready to breach the firewall!',
-    });
+    setReconFeedback('');
+    setFeedbackBar(null);
     onUpdateProgress((prev) => ({
       ...prev,
       reconDone: true,
@@ -214,6 +211,7 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
         ? prev.completedPhases
         : [...prev.completedPhases, 'recon'],
     }));
+    setPopup('recon-clear');
   };
 
   const handleDeployBattle = () => {
@@ -240,18 +238,19 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
         title: res.primaryRun.error ? 'COMPILATION FAULT' : 'LOGIC MISMATCH',
         tone: 'danger',
       });
-      setMira({
+      setFeedbackBar({
         mood: 'danger',
         text: res.primaryRun.error
           ? `Line ${res.primaryRun.error.line}: ${res.primaryRun.error.message}`
           : lang === 'zh-Hant'
-            ? `第 ${res.wavesCleared + 1} 波未通過！拖曳左側追蹤器檢查哪一步與預期不符。`
-            : `Wave ${res.wavesCleared + 1} failed! Scrub the trace below the stage to inspect memory.`,
+            ? `第 ${res.wavesCleared + 1} 波失敗！拖動下方追蹤器檢查哪一行與預期不符。`
+            : `Wave ${res.wavesCleared + 1} failed! Scrub the trace below to see what diverged.`,
       });
       return;
     }
 
     sound.shieldBreak();
+    setFeedbackBar(null);
     const nextEncounterCleared = { ...progress.encounterCleared, [encounter]: true };
     const bothCleared = Boolean(nextEncounterCleared.swap && nextEncounterCleared.reactor);
 
@@ -272,13 +271,7 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
           ? prev.completedPhases
           : [...prev.completedPhases, 'battle'],
       }));
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? `全部關卡與三波測試擊破！獲得 ${rank} 級評價與 MEMORY CORE v1！`
-            : `All waves shattered! Earned ${rank}-Rank and synced MEMORY CORE v1.`,
-      });
+      setPopup('boss-clear');
     } else {
       onUpdateProgress((prev) => ({
         ...prev,
@@ -289,17 +282,9 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
         title: encounter === 'swap' ? 'CHANNELS SWAPPED!' : 'OVERLOAD CORE SHATTERED!',
         tone: 'cyan',
       });
-      setMira({
-        mood: 'success',
-        text:
-          encounter === 'swap'
-            ? lang === 'zh-Hant'
-              ? '雙頻道交換過關！切換到「02 Overload Core」正面迎戰反應爐 Boss！'
-              : 'Channel Swap cleared! Switch to "02 Overload Core" to face the boss.'
-            : lang === 'zh-Hant'
-              ? 'Boss 已擊破！再清掉「01 Channel Swap」即可結算本關評級！'
-              : 'Boss defeated! Clear "01 Channel Swap" to finalize your sector rank.',
-      });
+      if (encounter === 'swap') {
+        setPopup('warmup-clear');
+      }
     }
   };
 
@@ -342,6 +327,143 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
       ? battleResult.waveDetails[expandedWave] ?? null
       : null;
 
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      if (!calibrated || adjustingSliders) {
+        return {
+          stepTag: 'STEP 1 / 2',
+          instruction: lang === 'zh-Hant' ? '把 Supply 調為 120、Usage 調為 45' : 'Drag Supply → 120 & Usage → 45',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'STEP 2 / 2',
+        instruction: lang === 'zh-Hant' ? '預測 120 - 45 結果並按 EXECUTE' : 'Predict remaining & press EXECUTE',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '追蹤 = 賦值並破解兩道鎖' : 'Trace = assignments to crack locks',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      if (encounter === 'swap') {
+        return {
+          stepTag: 'WARM-UP · 1 / 2',
+          instruction: lang === 'zh-Hant' ? '用 int temp 交換兩頻道後按 DEPLOY' : 'Swap left & right with temp, then DEPLOY',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'BOSS · 2 / 2',
+        instruction: lang === 'zh-Hant' ? '備份 initialRemaining、更新重算並印三行' : 'Snapshot initialRemaining, update, print 3 lines',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, calibrated, adjustingSliders, encounter, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '防火牆突破' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'warmup-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '暖身通關' : 'WARM-UP CLEARED',
+        title: t(brief.battle.warmupClearTitle ?? { en: 'Warm-Up Cleared!', zh: '暖身過關！' }, lang),
+        subtitle:
+          lang === 'zh-Hant'
+            ? `已掌握 temp 變數交換！接著切換到 02 ${t(brief.battle.bossName, lang)} 進行最終對決。`
+            : `Channel Swap unlocked! Ready to fight ${t(brief.battle.bossName, lang)}.`,
+        primaryLabel: lang === 'zh-Hant' ? `迎戰 Boss：${t(brief.battle.bossName, lang)}` : `FIGHT BOSS`,
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setEncounter('reactor');
+          setBattleResult(null);
+          setExpandedWave(null);
+          setTraceFrames([]);
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看破關獎勵' : 'VIEW RANK & REWARD',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
+
   return (
     <MissionStageLayout
       stage={
@@ -362,7 +484,8 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
           ? { name: 'OVERLOAD CORE', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -372,100 +495,123 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <div className="deck-row-between">
-            <h2 className="deck-heading">
-              {lang === 'zh-Hant' ? '製造並同步記憶體落差' : 'Break Sync, Then Restore'}
-            </h2>
-            <span className="deck-hint mono">A/D · W/S</span>
-          </div>
+          {!calibrated || adjustingSliders ? (
+            <>
+              <div className="deck-two-col">
+                <label className="control-tile">
+                  <div className="deck-row-between">
+                    <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>
+                      Supply (target 120) {energy === 120 ? '✓' : ''}
+                    </span>
+                    <strong className="mono">{energy}</strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={80}
+                    max={160}
+                    step={5}
+                    value={energy}
+                    onChange={(e) => setEnergy(Number(e.target.value))}
+                    style={{ accentColor: 'var(--cyan)' }}
+                  />
+                </label>
 
-          <div className="deck-two-col">
-            <label className="control-tile">
-              <div className="deck-row-between">
-                <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>Supply (energy)</span>
-                <strong className="mono">{energy}</strong>
+                <label className="control-tile">
+                  <div className="deck-row-between">
+                    <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>
+                      Usage (target 45) {used === 45 ? '✓' : ''}
+                    </span>
+                    <strong className="mono">{used}</strong>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={70}
+                    step={5}
+                    value={used}
+                    onChange={(e) => setUsed(Number(e.target.value))}
+                    style={{ accentColor: 'var(--amber)' }}
+                  />
+                </label>
               </div>
-              <input
-                type="range"
-                min={80}
-                max={160}
-                step={5}
-                value={energy}
-                onChange={(e) => setEnergy(Number(e.target.value))}
-                style={{ accentColor: 'var(--cyan)' }}
-              />
-            </label>
 
-            <label className="control-tile">
-              <div className="deck-row-between">
-                <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>Usage (used)</span>
-                <strong className="mono">{used}</strong>
+              <div className={`sync-strip mono ${stored !== energy - used ? 'desync' : 'ok'}`}>
+                <span>
+                  Physical <strong>{energy - used} MW</strong> · Memory <strong>{stored}</strong>
+                </span>
+                <span>{stored !== energy - used ? 'DESYNC' : 'SYNCED'}</span>
               </div>
-              <input
-                type="range"
-                min={0}
-                max={70}
-                step={5}
-                value={used}
-                onChange={(e) => setUsed(Number(e.target.value))}
-                style={{ accentColor: 'var(--amber)' }}
-              />
-            </label>
-          </div>
 
-          <div className={`sync-strip mono ${stored !== energy - used ? 'desync' : 'ok'}`}>
-            <span>
-              Physical <strong>{energy - used} MW</strong> · Memory <strong>{stored}</strong>
-            </span>
-            <span>{stored !== energy - used ? 'DESYNC' : 'SYNCED'}</span>
-          </div>
+              <div className="deck-hint mono" style={{ textAlign: 'right' }}>
+                {lang === 'zh-Hant' ? '快捷鍵：A/D 與 W/S' : 'Keys: A/D · W/S'}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="step-done-pill">
+                <span className="mono">
+                  ✓ Supply 120 · Usage 45 · Memory stuck at {stored}
+                </span>
+                <button
+                  type="button"
+                  className="step-adjust-btn"
+                  onClick={() => {
+                    sound.click();
+                    setAdjustingSliders(true);
+                  }}
+                >
+                  {lang === 'zh-Hant' ? '調整' : 'Adjust'}
+                </button>
+              </div>
 
-          <label className="deck-field">
-            <span className="deck-field-label mono">
-              {lang === 'zh-Hant'
-                ? '預測執行 remaining = energy - used; 後的值'
-                : 'Predict remaining after assignment'}
-            </span>
-            <input
-              type="number"
-              className="deck-input mono"
-              value={predictInput}
-              placeholder="?"
-              onChange={(e) => setPredictInput(e.target.value)}
-            />
-          </label>
+              <label className="deck-field">
+                <span className="deck-field-label mono">
+                  {lang === 'zh-Hant'
+                    ? '預測執行 remaining = energy - used; 後的值：'
+                    : 'Predict remaining after assignment (120 - 45):'}
+                </span>
+                <input
+                  type="number"
+                  className="deck-input mono"
+                  value={predictInput}
+                  placeholder="?"
+                  onChange={(e) => setPredictInput(e.target.value)}
+                />
+              </label>
 
-          {reconFeedback && (
-            <div className={`deck-feedback ${reconStatus === 'ok' ? 'ok' : 'err'}`}>
-              {reconFeedback}
-            </div>
+              {reconFeedback && (
+                <div className={`deck-feedback ${reconStatus === 'ok' ? 'ok' : 'err'}`}>
+                  {reconFeedback}
+                </div>
+              )}
+
+              <div className="deck-actions">
+                <button
+                  type="button"
+                  className="tac-btn primary deck-primary-cta"
+                  onClick={handleReconExecute}
+                >
+                  <Zap size={15} />
+                  <span>EXECUTE: remaining = energy - used;</span>
+                </button>
+              </div>
+            </>
           )}
 
-          <div className="deck-actions">
+          {progress.reconDone && (
             <button
               type="button"
-              className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`}
-              onClick={handleReconExecute}
+              className="quiet-proceed-link"
+              onClick={() => {
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
+              }}
             >
-              <Zap size={15} />
-              <span>EXECUTE: remaining = energy - used;</span>
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
             </button>
-
-            {progress.reconDone && (
-              <button
-                type="button"
-                className="tac-btn primary deck-primary-cta"
-                onClick={() => {
-                  sound.click();
-                  setTraceFrames([]);
-                  onPhaseChange('breach');
-                }}
-              >
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
 
@@ -474,8 +620,15 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
           locks={CH01_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '陷阱！改動舊變數不會讓已存的快照重算。' : 'Watch out—old snapshots do not auto-recalculate.',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -493,6 +646,7 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
                   ? prev.completedPhases
                   : [...prev.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -518,6 +672,7 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
                 setExpandedWave(null);
                 setTraceFrames([]);
                 setChaosNote(null);
+                setFeedbackBar(null);
               }}
             >
               {swapCleared && <Check size={12} strokeWidth={2.5} />}
@@ -535,22 +690,13 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
                 setExpandedWave(null);
                 setTraceFrames([]);
                 setChaosNote(null);
+                setFeedbackBar(null);
               }}
             >
               {reactorCleared && <Check size={12} strokeWidth={2.5} />}
               <span>02 Overload Core</span>
             </button>
           </div>
-
-          <p className="mission-goal">
-            {encounter === 'swap'
-              ? lang === 'zh-Hant'
-                ? '用 int temp 交換 left 與 right，印出 "Left: <val>" 與 "Right: <val>"。'
-                : 'Swap left and right with an int temp variable, then print "Left: <val>" and "Right: <val>".'
-              : lang === 'zh-Hant'
-                ? '宣告 energy=120、used=45，備份 remaining 至 initialRemaining，重設為 150/65 重算，宣告 boolean online=true 並印出 Initial / Updated / Online。'
-                : 'Set energy=120, used=45, snapshot initialRemaining, update to 150/65, declare boolean online=true, and print Initial / Updated / Online.'}
-          </p>
 
           <CodeTerminal
             value={encounter === 'swap' ? swapCode : reactorCode}
@@ -686,6 +832,15 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );

@@ -17,6 +17,8 @@ export interface ChapterProgress {
 export interface CampaignState {
   version: 1;
   lang: Lang;
+  seenWelcome?: boolean;
+  skipBriefings?: boolean;
   unlockedChips: string[];
   chapters: Record<number, ChapterProgress>;
 }
@@ -39,6 +41,8 @@ export function createInitialState(): CampaignState {
   return {
     version: 1,
     lang: 'en',
+    seenWelcome: false,
+    skipBriefings: false,
     unlockedChips: [],
     chapters: {},
   };
@@ -53,6 +57,8 @@ export function loadCampaignState(): CampaignState {
     return {
       version: 1,
       lang: parsed.lang === 'zh-Hant' ? 'zh-Hant' : 'en',
+      seenWelcome: Boolean(parsed.seenWelcome),
+      skipBriefings: Boolean(parsed.skipBriefings),
       unlockedChips: Array.isArray(parsed.unlockedChips) ? parsed.unlockedChips : [],
       chapters: parsed.chapters && typeof parsed.chapters === 'object' ? parsed.chapters : {},
     };

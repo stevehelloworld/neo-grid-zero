@@ -11,12 +11,14 @@ import {
   CH04_STARTER_CODE,
   evaluateSentinelBattle,
 } from '../../game/chapters/ch04Sentinel';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { DroneFlightResult, DroneSpec, PhaseId, SentinelBattleResult } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { ActiveDroneVisual, SentinelCanvas } from '../stages/SentinelCanvas';
 
 export interface Ch04MissionProps {
@@ -29,8 +31,14 @@ export interface Ch04MissionProps {
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onOpenChapter: (chapterId: number) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosDroneTrigger?: { drone: DroneSpec; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'boss-clear';
 
 export const Ch04Mission: React.FC<Ch04MissionProps> = ({
   lang,
@@ -42,9 +50,14 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
   onCutIn,
   onOpenChapter,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosDroneTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS.find((c) => c.id === 4)!;
+  const brief = MISSION_BRIEFINGS[4];
 
   // Phase 1: Recon state
   const [reconIdx, setReconIdx] = useState(0);
@@ -70,16 +83,17 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
   const flightCounter = useRef(1);
   const seqTimersRef = useRef<number[]>([]);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '先點「測試故障自動駕駛」目擊王牌撞毀的原因，再手動引導三架無人機進正確航道！'
-        : 'Test the corrupted autopilot first to spot the bug, then route all 3 recon drones cleanly.',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -88,40 +102,27 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
   }, []);
 
   useEffect(() => {
-    if (phase === 'recon') {
-      setMira({
-        mood: progress.reconDone ? 'success' : 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '先試試故障自動駕駛，再手動為 ACE-16、CADET-14、ROOKIE-12 選擇正確航道！'
-            : 'Watch the corrupted autopilot fail, then route ACE-16, CADET-14, and ROOKIE-12.',
-      });
-    } else if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? '解開三道布林邏輯鎖，奪回 Sentinel Gatekeeper 控制權！'
-            : 'Crack all 3 boolean locks to override Sentinel Gatekeeper.',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '優先序：trained && age >= 16 → CLEAR；否則 mentor && age >= 13 → PRACTICE；其餘 WAIT。'
-            : 'Priority: trained && age >= 16 → CLEAR; else mentor && age >= 13 → PRACTICE; else WAIT.',
-      });
-    } else {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? '空域完全暢通！準備推進第 05 話蓄電高塔迴圈！'
-            : 'Airspace secured! Advance to Ch.05 Surge Tower.',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang, progress.reconDone]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
+
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
 
   const launchDroneVisual = (
     drone: DroneSpec,
@@ -150,6 +151,8 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
 
   useEffect(() => {
     if (!chaosDroneTrigger) return;
+    suppressNextBriefRef.current = true;
+    setPopup(null);
     onPhaseChange('battle');
     seqTimersRef.current.forEach((id) => window.clearTimeout(id));
     const res = evaluateSentinelBattle(code, chaosDroneTrigger.drone);
@@ -167,12 +170,17 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
       setChaosBanner(
         `GM CHAOS DRONE ${flight.drone.callsign} → ${flight.actual} (VERIFIED)`,
       );
+      setFeedbackBar(null);
       onCutIn({ tag: 'GM DRONE', title: `ROUTED → ${flight.actual}`, tone: 'lime' });
     } else {
       sound.hitError();
       setChaosBanner(
         `GM CHAOS DRONE ${flight.drone.callsign} CRASHED (${flight.actual}, need ${flight.drone.expected})`,
       );
+      setFeedbackBar({
+        mood: 'danger',
+        text: `${flight.drone.callsign} returned "${flight.actual}", expected "${flight.drone.expected}".`,
+      });
       onCutIn({ tag: 'GM DRONE', title: 'MISROUTED CRASH!', tone: 'danger' });
     }
   }, [chaosDroneTrigger]);
@@ -193,12 +201,12 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
       title: 'age >= 13 HIJACKED ACE PILOT!',
       tone: 'danger',
     });
-    setMira({
+    setFeedbackBar({
       mood: 'danger',
       text:
         lang === 'zh-Hant'
-          ? '抓到了！if (age >= 13) 寫在最前面，讓 16 歲已受訓的 ACE-16 誤掉進 PRACTICE！'
-          : 'Caught! if (age >= 13) comes first, trapping trained 16yo ACE-16 in PRACTICE!',
+          ? 'if (age >= 13) 排在最前面，讓 16 歲已受訓的 ACE-16 誤進 PRACTICE！'
+          : 'if (age >= 13) runs first, trapping trained 16yo ACE-16 in PRACTICE!',
     });
 
     if (reconCleared.every(Boolean)) {
@@ -209,6 +217,7 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
           ? p.completedPhases
           : [...p.completedPhases, 'recon'],
       }));
+      setPopup('recon-clear');
     }
   };
 
@@ -220,23 +229,24 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
 
     if (!ok) {
       sound.hitError();
-      setMira({
+      setFeedbackBar({
         mood: 'danger',
         text:
           lang === 'zh-Hant'
-            ? `${drone.callsign} (age=${drone.age}, T=${drone.trained}, M=${drone.mentor}) 不能進 ${lane}。`
-            : `${drone.callsign} (age=${drone.age}, T=${drone.trained}, M=${drone.mentor}) cannot enter ${lane}.`,
+            ? `${drone.callsign} (age=${drone.age}, trained=${drone.trained}, mentor=${drone.mentor}) 不符合 ${lane} 規則！`
+            : `${drone.callsign} cannot enter ${lane}—recheck the priority order!`,
       });
       return;
     }
 
     sound.breachSuccess();
+    setFeedbackBar(null);
     const nextCleared = [...reconCleared];
     nextCleared[reconIdx] = true;
     setReconCleared(nextCleared);
 
     const allDronesRouted = nextCleared.every(Boolean);
-    if (allDronesRouted && autopilotSeen) {
+    if (allDronesRouted) {
       onUpdateProgress((p) => ({
         ...p,
         reconDone: true,
@@ -244,33 +254,12 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
           ? p.completedPhases
           : [...p.completedPhases, 'recon'],
       }));
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? '全部無人機引導完成，也抓出優先序 Bug 了。進入邏輯突入！'
-            : 'All 3 drones routed and bug diagnosed. Proceed to Breach!',
-      });
-    } else if (!allDronesRouted) {
+      setPopup('recon-clear');
+    } else {
       const nextIdx = nextCleared.findIndex((x) => !x);
       if (nextIdx >= 0) {
-        window.setTimeout(() => setReconIdx(nextIdx), 600);
+        setReconIdx(nextIdx);
       }
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? `${drone.callsign} 安全進入 ${lane}！繼續引導下一架。`
-            : `${drone.callsign} cleared into ${lane}! Route the next drone.`,
-      });
-    } else {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '三架都放行了！別忘了按一次「測試故障自動駕駛」看 Bug！'
-            : 'All 3 routed! Click "Test Corrupted Autopilot" once to inspect the bug.',
-      });
     }
   };
 
@@ -314,6 +303,7 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
         const rank = computeRank(progress.breachMistakes, progress.battleMistakes);
         sound.missionClear();
         onUnlockChip(meta.chipId);
+        setFeedbackBar(null);
         onCutIn({
           tag: 'SEC-04 RESTORED',
           title: `GATEKEEPER DEFEATED // ${rank}-RANK`,
@@ -326,23 +316,17 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
             ? prev.completedPhases
             : [...prev.completedPhases, 'battle'],
         }));
-        setMira({
-          mood: 'success',
-          text:
-            lang === 'zh-Hant'
-              ? `9 架無人機零碰撞放行！獲得 ${rank} 級評價與 LOGIC GATE v2！`
-              : `All 9 drones routed cleanly! Earned ${rank}-Rank and LOGIC GATE v2.`,
-        });
+        setPopup('boss-clear');
       } else {
         onUpdateProgress((p) => ({ ...p, battleMistakes: p.battleMistakes + 1 }));
         const fail = res.failedFlight;
-        setMira({
+        setFeedbackBar({
           mood: 'danger',
           text: fail?.run.error
             ? `Line ${fail.run.error.line}: ${fail.run.error.message}`
             : lang === 'zh-Hant'
-              ? `${fail?.drone.callsign} 回傳 "${fail?.actual}"，應為 "${fail?.drone.expected}"。點擊無人機膠囊檢查分支追蹤！`
-              : `${fail?.drone.callsign} returned "${fail?.actual}" instead of "${fail?.drone.expected}". Scrub the trace!`,
+              ? `${fail?.drone.callsign} 回傳 "${fail?.actual}"，應為 "${fail?.drone.expected}"。`
+              : `${fail?.drone.callsign} returned "${fail?.actual}", expected "${fail?.drone.expected}".`,
         });
       }
     }, totalDelay);
@@ -363,6 +347,119 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
       : battleResult.wavesCleared
     : progress.rank ? 3 : 0;
 
+  const activeDroneCard = CH04_RECON_DRONES[reconIdx];
+
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      if (!autopilotSeen) {
+        return {
+          stepTag: 'STEP 1 / 2',
+          instruction: lang === 'zh-Hant' ? '按下故障自動駕駛，親眼找出優先序漏洞' : 'Test the broken autopilot to spot the bug',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'STEP 2 / 2',
+        instruction:
+          lang === 'zh-Hant'
+            ? `引導無人機 ${reconIdx + 1} / 3 進入正確航道`
+            : `Route Drone ${reconIdx + 1} of 3 to the right gate`,
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '破解三道 && / || 與笛摩根邏輯鎖' : 'Crack 3 boolean & De Morgan locks',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      return {
+        stepTag: 'BOSS BATTLE',
+        instruction: lang === 'zh-Hant' ? '先檢查 trained && age >= 16，再檢查 PRACTICE' : 'Check trained && age >= 16 before PRACTICE',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, autopilotSeen, reconIdx, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '閘門解鎖' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看破關獎勵' : 'VIEW RANK & REWARD',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
+
   return (
     <MissionStageLayout
       stage={
@@ -381,7 +478,8 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
           ? { name: 'SENTINEL GATEKEEPER', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -391,74 +489,87 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <div className="deck-row-between">
-            <h2 className="deck-heading">
-              {lang === 'zh-Hant' ? '手動引導並診斷順序 Bug' : 'Route Drones & Inspect Bug'}
-            </h2>
+          {!autopilotSeen ? (
+            <>
+              <p className="deck-copy">
+                {lang === 'zh-Hant'
+                  ? '目前自動駕駛的 if-else 順序錯了！先按下下方按鈕，看王牌 ACE-16 發生了什麼事。'
+                  : 'The old if-else order is broken. Fire the corrupted autopilot first to see what happens to ACE-16.'}
+              </p>
+
+              <button
+                type="button"
+                className="tac-btn crimson deck-primary-cta"
+                onClick={handleCorruptedAutopilot}
+              >
+                <AlertTriangle size={15} />
+                <span>{lang === 'zh-Hant' ? 'TEST CORRUPTED AUTOPILOT（測故障）' : 'TEST CORRUPTED AUTOPILOT'}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="step-done-pill">
+                <span className="mono">
+                  {lang === 'zh-Hant' ? '✓ 已目擊 Bug：if (age >= 13) 搶先攔截了 ACE-16' : '✓ Bug seen: age >= 13 trapped ACE-16'}
+                </span>
+                <button
+                  type="button"
+                  className="step-adjust-btn"
+                  onClick={handleCorruptedAutopilot}
+                >
+                  {lang === 'zh-Hant' ? '重看一次' : 'Replay bug'}
+                </button>
+              </div>
+
+              <div className="rule-strip mono">
+                <div>1. <strong style={{ color: 'var(--lime)' }}>CLEAR</strong>: <code>trained &amp;&amp; age &gt;= 16</code></div>
+                <div>2. <strong style={{ color: 'var(--cyan)' }}>PRACTICE</strong>: <code>mentor &amp;&amp; age &gt;= 13</code></div>
+                <div>3. <strong style={{ color: 'var(--amber)' }}>WAIT</strong>: {lang === 'zh-Hant' ? '其餘條件' : 'all others'}</div>
+              </div>
+
+              <div className="focused-drone-card">
+                <div>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--cyan)' }}>
+                    DRONE {reconIdx + 1} / 3
+                  </div>
+                  <div className="display" style={{ fontSize: 20, fontWeight: 700 }}>
+                    {activeDroneCard.callsign}
+                  </div>
+                </div>
+                <div className="mono" style={{ fontSize: 12.5, color: 'var(--ink-secondary)', textAlign: 'right' }}>
+                  <div>age = <strong>{activeDroneCard.age}</strong></div>
+                  <div>trained = <strong>{String(activeDroneCard.trained)}</strong> · mentor = <strong>{String(activeDroneCard.mentor)}</strong></div>
+                </div>
+              </div>
+
+              <div className="deck-three-col">
+                <button type="button" className="tac-btn lime" onClick={() => handleManualRoute('CLEAR')}>
+                  CLEAR
+                </button>
+                <button type="button" className="tac-btn primary" onClick={() => handleManualRoute('PRACTICE')}>
+                  PRACTICE
+                </button>
+                <button type="button" className="tac-btn amber" onClick={() => handleManualRoute('WAIT')}>
+                  WAIT
+                </button>
+              </div>
+            </>
+          )}
+
+          {progress.reconDone && (
             <button
               type="button"
-              className="tac-btn ghost compact-btn"
-              onClick={handleCorruptedAutopilot}
+              className="quiet-proceed-link"
+              onClick={() => {
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
+              }}
             >
-              <AlertTriangle size={13} />
-              <span>{autopilotSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '測故障碼' : 'Test Bug'}</span>
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
             </button>
-          </div>
-
-          <div className="rule-strip mono">
-            <div><strong style={{ color: 'var(--lime)' }}>CLEAR</strong>: <code>trained && age &gt;= 16</code></div>
-            <div><strong style={{ color: 'var(--cyan)' }}>PRACTICE</strong>: <code>mentor && age &gt;= 13</code></div>
-            <div><strong style={{ color: 'var(--ink-muted)' }}>WAIT</strong>: {lang === 'zh-Hant' ? '其餘條件' : 'all others'}</div>
-          </div>
-
-          <div className="deck-three-col">
-            {CH04_RECON_DRONES.map((d, idx) => (
-              <button
-                key={d.id}
-                type="button"
-                className={`drone-select-btn ${idx === reconIdx ? 'active' : ''} ${reconCleared[idx] ? 'cleared' : ''}`}
-                onClick={() => {
-                  sound.click();
-                  setReconIdx(idx);
-                }}
-              >
-                <span className="drone-call">{reconCleared[idx] ? '✓ ' : ''}{d.callsign}</span>
-                <span className="drone-stats mono">age:{d.age} T:{d.trained ? 1 : 0} M:{d.mentor ? 1 : 0}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="deck-three-col">
-            <button type="button" className="tac-btn lime" onClick={() => handleManualRoute('CLEAR')}>
-              CLEAR
-            </button>
-            <button type="button" className="tac-btn primary" onClick={() => handleManualRoute('PRACTICE')}>
-              PRACTICE
-            </button>
-            <button type="button" className="tac-btn amber" onClick={() => handleManualRoute('WAIT')}>
-              WAIT
-            </button>
-          </div>
-
-          <div className="deck-row-between">
-            <span className="deck-hint mono">
-              {reconCleared.filter(Boolean).length}/3 {lang === 'zh-Hant' ? '架放行' : 'routed'} · {autopilotSeen ? '✓ bug tested' : 'test bug once'}
-            </span>
-            {progress.reconDone && (
-              <button
-                type="button"
-                className="tac-btn primary"
-                onClick={() => {
-                  sound.click();
-                  setTraceFrames([]);
-                  onPhaseChange('breach');
-                }}
-              >
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
 
@@ -467,8 +578,15 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
           locks={CH04_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '檢查等號邊界與笛摩根定律反轉規則！' : 'Recheck inclusive bounds and De Morgan flipping!',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -486,6 +604,7 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
                   ? prev.completedPhases
                   : [...prev.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -498,12 +617,6 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
 
       {phase === 'battle' && (
         <div className="deck-stack">
-          <p className="mission-goal">
-            {lang === 'zh-Hant'
-              ? '實作 access(age, trained, mentor)：trained && age >= 16 優先回傳 "CLEAR"；其餘 mentor && age >= 13 回傳 "PRACTICE"；否則 "WAIT"。'
-              : 'Implement access(age, trained, mentor): "CLEAR" if trained && age >= 16 first, else "PRACTICE" if mentor && age >= 13, else "WAIT".'}
-          </p>
-
           <CodeTerminal
             value={code}
             starterCode={CH04_STARTER_CODE}
@@ -623,6 +736,15 @@ export const Ch04Mission: React.FC<Ch04MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );

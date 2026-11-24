@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowRight, Check, Flame, Scissors, ShieldAlert, Zap } from 'lucide-react';
 import { sound } from '../../engine/audio/synth';
 import { Lang, t, UI_COPY } from '../../engine/i18n/text';
@@ -13,12 +13,14 @@ import {
   evaluateInitialsEncounter,
   evaluateRouteEncounter,
 } from '../../game/chapters/ch03Archive';
+import { MISSION_BRIEFINGS } from '../../game/missionBriefings';
 import { ChapterProgress, computeRank } from '../../game/store';
 import { PhaseId } from '../../game/types';
 import { BreachPanel } from '../BreachPanel';
 import { CodeTerminal } from '../CodeTerminal';
 import { CutInData } from '../CutInBanner';
-import { MissionStageLayout } from '../MissionStageLayout';
+import { MissionPopup } from '../MissionPopup';
+import { MissionStageLayout, ReactiveFeedbackInfo } from '../MissionStageLayout';
 import { ArchiveCanvas } from '../stages/ArchiveCanvas';
 
 export interface Ch03MissionProps {
@@ -31,8 +33,14 @@ export interface Ch03MissionProps {
   onCutIn: (c: Omit<CutInData, 'id'>) => void;
   onOpenChapter: (chapterId: number) => void;
   onBackToMap: () => void;
+  skipBriefings?: boolean;
+  onToggleSkipBriefings?: (next: boolean) => void;
+  guideRequestSeq?: number;
+  suppressAutoBriefing?: boolean;
   chaosRouteTrigger?: { route: string; seq: number } | null;
 }
+
+type PopupKind = null | 'briefing' | 'recon-clear' | 'breach-clear' | 'warmup-clear' | 'boss-clear';
 
 export const Ch03Mission: React.FC<Ch03MissionProps> = ({
   lang,
@@ -44,13 +52,19 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
   onCutIn,
   onOpenChapter,
   onBackToMap,
+  skipBriefings = false,
+  onToggleSkipBriefings,
+  guideRequestSeq = 0,
+  suppressAutoBriefing = false,
   chaosRouteTrigger,
 }) => {
   const meta = CAMPAIGN_CHAPTERS.find((c) => c.id === 3)!;
+  const brief = MISSION_BRIEFINGS[3];
 
   // Phase 1: Recon Optical Slicer on "DRONE"
   const [beginIdx, setBeginIdx] = useState(progress.reconDone ? 1 : 0);
   const [endIdx, setEndIdx] = useState(progress.reconDone ? 4 : 3);
+  const [adjustingSlice, setAdjustingSlice] = useState(false);
   const [slicedText, setSlicedText] = useState(progress.reconDone ? 'RON' : 'DRO');
   const [slicedOk, setSlicedOk] = useState(progress.reconDone);
   const [oobSeen, setOobSeen] = useState(progress.reconDone);
@@ -75,53 +89,43 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
   const [traceFrames, setTraceFrames] = useState<TraceFrame[]>([]);
   const [stepIdx, setStepIdx] = useState(0);
   const [autoPlaySeq, setAutoPlaySeq] = useState(0);
+  const [feedbackBar, setFeedbackBar] = useState<ReactiveFeedbackInfo | null>(null);
 
-  const [mira, setMira] = useState<{ mood: 'neutral' | 'alert' | 'danger' | 'success'; text: string }>({
-    mood: 'alert',
-    text:
-      lang === 'zh-Hant'
-        ? '通訊膠帶受損！調整雷射起訖點從 "DRONE" 切出 "RON"，再測試一次越界或不可變實驗。'
-        : 'Archive tape corrupted! Calibrate the slicer to extract "RON", then test OOB or immutability.',
-  });
+  // Guided Popups
+  const [popup, setPopup] = useState<PopupKind>(() =>
+    phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing ? 'briefing' : null,
+  );
+  const prevPhaseRef = useRef<PhaseId>(phase);
+  const lastGuideSeqRef = useRef(guideRequestSeq);
+  const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
-    if (phase === 'recon') {
-      setMira({
-        mood: progress.reconDone ? 'success' : 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '從 "DRONE" 切出 "RON"，並測試一次越界錯誤或字串不可變性按鈕！'
-            : 'Slice "RON" from "DRONE", then run one OOB or Immutability anomaly test!',
-      });
-    } else if (phase === 'breach') {
-      setMira({
-        mood: 'neutral',
-        text:
-          lang === 'zh-Hant'
-            ? 'substring(a, b) 不含終點 b，且 String 永遠不可原地改變。解開三道鎖！'
-            : 'substring(a, b) excludes end index b and Strings are immutable. Crack 3 locks!',
-      });
-    } else if (phase === 'battle') {
-      setMira({
-        mood: 'alert',
-        text:
-          lang === 'zh-Hant'
-            ? '先過 01 Initials Slicer，再用 indexOf("-") 擊敗 Boss Route Extractor！'
-            : 'Clear Initials Slicer first, then use indexOf("-") to defeat Immutable Archivist!',
-      });
-    } else {
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? 'Act I 全數通關！STRING LASER 晶片已裝備，下一戰進入 Act II！'
-            : 'Act I complete! STRING LASER synced. Ready for Act II!',
-      });
+    if (prevPhaseRef.current === phase) return;
+    prevPhaseRef.current = phase;
+    setFeedbackBar(null);
+    if (suppressNextBriefRef.current) {
+      suppressNextBriefRef.current = false;
+      setPopup(null);
+      return;
     }
-  }, [phase, lang, progress.reconDone]);
+    if (phase !== 'debrief' && !skipBriefings && !suppressAutoBriefing) {
+      setPopup('briefing');
+    } else {
+      setPopup(null);
+    }
+  }, [phase, skipBriefings, suppressAutoBriefing]);
+
+  useEffect(() => {
+    if (guideRequestSeq !== lastGuideSeqRef.current) {
+      lastGuideSeqRef.current = guideRequestSeq;
+      if (phase !== 'debrief') setPopup('briefing');
+    }
+  }, [guideRequestSeq, phase]);
 
   useEffect(() => {
     if (chaosRouteTrigger) {
+      suppressNextBriefRef.current = true;
+      setPopup(null);
       setEncounter('route');
       onPhaseChange('battle');
       const res = evaluateRouteEncounter(routeCode, chaosRouteTrigger.route);
@@ -135,10 +139,12 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       if (res.passed) {
         sound.shieldBreak();
         setChaosNote(`GM Chaos routeSuffix("${chaosRouteTrigger.route}") → "${tr.actual}" ✓`);
+        setFeedbackBar(null);
         onCutIn({ tag: 'GM CHAOS', title: `EXTRACTED "${tr.actual}"`, tone: 'lime' });
       } else {
         sound.hitError();
         setChaosNote(`GM Chaos "${chaosRouteTrigger.route}" FAILED (got "${tr.actual}", need "${tr.expected}")`);
+        setFeedbackBar({ mood: 'danger', text: `Expected "${tr.expected}", got "${tr.actual}".` });
         onCutIn({ tag: 'GM CHAOS', title: 'SLICER MISMATCH!', tone: 'danger' });
       }
     }
@@ -151,6 +157,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         reconDone: true,
         completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
       }));
+      setPopup('recon-clear');
     }
   };
 
@@ -165,7 +172,9 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       setReconStatus('error');
       setSlicedText('OOB ERROR');
       setOobSeen(true);
-      setReconFeedback(run.error?.message ?? 'StringIndexOutOfBoundsException');
+      const errText = run.error?.message ?? 'StringIndexOutOfBoundsException';
+      setReconFeedback(errText);
+      setFeedbackBar({ mood: 'danger', text: errText });
       markReconIfReady(slicedOk, true, immutableSeen);
       return;
     }
@@ -175,16 +184,16 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       sound.breachSuccess();
       setReconStatus('ok');
       setSlicedOk(true);
-      setReconFeedback(
-        lang === 'zh-Hant'
-          ? '切出 "RON"！substring(1, 4) 取索引 1–3 不含 4。記得也測一次越界或不可變按鈕！'
-          : 'Sliced "RON"! substring(1, 4) copies indexes 1–3 and excludes 4.',
-      );
+      setAdjustingSlice(false);
+      setReconFeedback('');
+      setFeedbackBar(null);
       markReconIfReady(true, oobSeen, immutableSeen);
     } else {
       sound.click();
       setReconStatus('idle');
-      setReconFeedback(`s.substring(${beginIdx}, ${endIdx}) → "${out}". Target is "RON".`);
+      const hint = `s.substring(${beginIdx}, ${endIdx}) → "${out}". Target is "RON".`;
+      setReconFeedback(hint);
+      setFeedbackBar({ mood: 'alert', text: hint });
     }
   };
 
@@ -198,15 +207,13 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     setOobSeen(true);
     setReconStatus('error');
     setSlicedText('StringIndexOutOfBounds!');
+    const msg =
+      lang === 'zh-Hant'
+        ? 'end=7 超過長度 5，立刻觸發 StringIndexOutOfBoundsException！'
+        : 'end=7 exceeds length 5, throwing StringIndexOutOfBoundsException!';
     setReconFeedback(run.error?.message ?? 'StringIndexOutOfBoundsException');
+    setFeedbackBar({ mood: 'danger', text: msg });
     markReconIfReady(slicedOk, true, immutableSeen);
-    setMira({
-      mood: 'danger',
-      text:
-        lang === 'zh-Hant'
-          ? 'end=7 超過長度 5，立刻觸發 StringIndexOutOfBoundsException！'
-          : 'end=7 exceeds length 5, throwing StringIndexOutOfBoundsException!',
-    });
   };
 
   const handleTestImmutable = () => {
@@ -219,11 +226,12 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     setImmutableSeen(true);
     setReconStatus('ok');
     setSlicedText('s stays "DRONE"');
-    setReconFeedback(
+    const msg =
       lang === 'zh-Hant'
         ? 's.substring(0, 3); 沒存回變數，s 依然維持 "DRONE"！'
-        : 's.substring(0, 3); discarded its result, so s remains "DRONE".',
-    );
+        : 's.substring(0, 3); discarded its result, so s remains "DRONE".';
+    setReconFeedback(msg);
+    setFeedbackBar({ mood: 'success', text: msg });
     markReconIfReady(slicedOk, oobSeen, true);
   };
 
@@ -252,7 +260,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         title: focusTrial?.run.error ? 'STRING BOUNDARY FAULT' : 'ARCHIVE MISMATCH',
         tone: 'danger',
       });
-      setMira({
+      setFeedbackBar({
         mood: 'danger',
         text: focusTrial?.run.error
           ? `Line ${focusTrial.run.error.line}: ${focusTrial.run.error.message}`
@@ -262,6 +270,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     }
 
     sound.shieldBreak();
+    setFeedbackBar(null);
     const nextCleared = { ...progress.encounterCleared, [encounter]: true };
     const both = Boolean(nextCleared.initials && nextCleared.route);
     if (both) {
@@ -275,13 +284,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         encounterCleared: nextCleared,
         completedPhases: p.completedPhases.includes('battle') ? p.completedPhases : [...p.completedPhases, 'battle'],
       }));
-      setMira({
-        mood: 'success',
-        text:
-          lang === 'zh-Hant'
-            ? `不變檔案官擊破！獲得 ${rank} 級評價與 STRING LASER！`
-            : `IMMUTABLE ARCHIVIST neutralized! Earned ${rank}-Rank and STRING LASER.`,
-      });
+      setPopup('boss-clear');
     } else {
       onUpdateProgress((p) => ({ ...p, encounterCleared: nextCleared }));
       onCutIn({
@@ -289,6 +292,9 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         title: encounter === 'initials' ? 'INITIALS SLICER VERIFIED!' : 'ROUTE EXTRACTOR CLEARED!',
         tone: 'cyan',
       });
+      if (encounter === 'initials') {
+        setPopup('warmup-clear');
+      }
     }
   };
 
@@ -315,6 +321,142 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         : battleResult.wavesCleared
       : encounter === 'route' && progress.rank ? 3 : 0;
 
+  const stepBanner = useMemo(() => {
+    const openGuide = () => setPopup('briefing');
+    if (phase === 'recon') {
+      if (!slicedOk || adjustingSlice) {
+        return {
+          stepTag: 'STEP 1 / 2',
+          instruction: lang === 'zh-Hant' ? '調整拉桿從 "DRONE" 切出 "RON"' : 'Set begin/end sliders to slice "RON"',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'STEP 2 / 2',
+        instruction: lang === 'zh-Hant' ? '點選一個字串陷阱進行實測' : 'Trigger 1 String trap below',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'breach') {
+      return {
+        stepTag: 'PHASE 2 · BREACH',
+        instruction: lang === 'zh-Hant' ? '解開三道字串與 Math API 鎖' : 'Crack 3 String & Math API locks',
+        onOpenGuide: openGuide,
+      };
+    }
+    if (phase === 'battle') {
+      if (encounter === 'initials') {
+        return {
+          stepTag: 'WARM-UP · 1 / 2',
+          instruction: lang === 'zh-Hant' ? '取出兩字首字母並大寫輸出' : 'Return initials of both names (e.g. "MB")',
+          onOpenGuide: openGuide,
+        };
+      }
+      return {
+        stepTag: 'BOSS · 2 / 2',
+        instruction: lang === 'zh-Hant' ? '用 indexOf("-") 抽出 "-" 後方的路線代碼' : 'Extract everything after "-" safely',
+        onOpenGuide: openGuide,
+      };
+    }
+    return undefined;
+  }, [phase, slicedOk, adjustingSlice, encounter, lang]);
+
+  const currentBrief =
+    phase === 'breach' ? brief.breach : phase === 'battle' ? brief.battle : brief.recon;
+
+  const popupConfig = (() => {
+    if (popup === 'briefing') {
+      return {
+        open: true,
+        variant: 'briefing' as const,
+        badge:
+          phase === 'breach'
+            ? lang === 'zh-Hant' ? '階段 2 · 邏輯鎖' : 'PHASE 2 · BREACH'
+            : phase === 'battle'
+              ? lang === 'zh-Hant' ? '階段 3 · 實戰對決' : 'PHASE 3 · BOSS'
+              : lang === 'zh-Hant' ? '階段 1 · 現場偵查' : 'PHASE 1 · RECON',
+        title: t(currentBrief.title, lang),
+        steps: currentBrief.steps.map((s) => t(s, lang)),
+        primaryLabel: lang === 'zh-Hant' ? '知道了，開始！' : 'GOT IT · START',
+        onPrimary: () => setPopup(null),
+      };
+    }
+    if (popup === 'recon-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '偵查成功' : 'PHASE 1 CLEARED',
+        title: t(brief.recon.clearTitle, lang),
+        subtitle: t(brief.recon.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'NEXT: BREACH',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          onPhaseChange('breach');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'breach-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '檔案館解鎖' : 'PHASE 2 CLEARED',
+        title: t(brief.breach.clearTitle, lang),
+        subtitle: t(brief.breach.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '迎戰關卡 Boss' : 'START BOSS BATTLE',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setTraceFrames([]);
+          setBattleResult(null);
+          onPhaseChange('battle');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'warmup-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: lang === 'zh-Hant' ? '暖身通關' : 'WARM-UP CLEARED',
+        title: t(brief.battle.warmupClearTitle ?? { en: 'Slicer Cleared!', zh: '首字母切片過關！' }, lang),
+        subtitle:
+          lang === 'zh-Hant'
+            ? `已通過 Initials Slicer！接著迎戰 02 ${t(brief.battle.bossName, lang)}。`
+            : `Initials Slicer cleared! Ready to fight ${t(brief.battle.bossName, lang)}.`,
+        primaryLabel: lang === 'zh-Hant' ? `迎戰 Boss：${t(brief.battle.bossName, lang)}` : 'FIGHT BOSS',
+        secondaryLabel: lang === 'zh-Hant' ? '留在此頁' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          setEncounter('route');
+          setBattleResult(null);
+          setTraceFrames([]);
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    if (popup === 'boss-clear') {
+      return {
+        open: true,
+        variant: 'clear' as const,
+        badge: `${meta.chipName} · RANK ${progress.rank ?? 'S'}`,
+        rank: progress.rank ?? 'S',
+        title: t(brief.battle.clearTitle, lang),
+        subtitle: t(brief.battle.takeaway, lang),
+        primaryLabel: lang === 'zh-Hant' ? '查看破關獎勵' : 'VIEW RANK & REWARD',
+        secondaryLabel: lang === 'zh-Hant' ? '留在戰場' : 'Stay here',
+        onPrimary: () => {
+          setPopup(null);
+          onPhaseChange('debrief');
+        },
+        onSecondary: () => setPopup(null),
+      };
+    }
+    return null;
+  })();
+
   return (
     <MissionStageLayout
       stage={
@@ -336,7 +478,8 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
           ? { name: 'IMMUTABLE ARCHIVIST', shields: 3, broken: brokenShields }
           : undefined
       }
-      mira={mira}
+      feedbackBar={feedbackBar}
+      stepBanner={stepBanner}
       traceFrames={traceFrames}
       stepIdx={stepIdx}
       onStepChange={setStepIdx}
@@ -346,73 +489,90 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     >
       {phase === 'recon' && (
         <div className="deck-stack">
-          <div className="deck-row-between">
-            <h2 className="deck-heading">
-              {lang === 'zh-Hant' ? '從 "DRONE" 切出 "RON"' : 'Slice "RON" from "DRONE"'}
-            </h2>
-            <span className="deck-hint mono">
-              {slicedOk ? '✓ RON' : 'Slice'} · {oobSeen || immutableSeen ? '✓ Bug' : 'Test anomaly'}
-            </span>
-          </div>
-
-          <div className="deck-two-col">
-            <label className="control-tile">
-              <div className="deck-row-between">
-                <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>begin</span>
-                <strong className="mono">{beginIdx}</strong>
+          {!slicedOk || adjustingSlice ? (
+            <>
+              <div className="deck-two-col">
+                <label className="control-tile">
+                  <div className="deck-row-between">
+                    <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>begin</span>
+                    <strong className="mono">{beginIdx}</strong>
+                  </div>
+                  <input type="range" min={0} max={5} value={beginIdx} onChange={(e) => setBeginIdx(Number(e.target.value))} style={{ accentColor: 'var(--cyan)' }} />
+                </label>
+                <label className="control-tile">
+                  <div className="deck-row-between">
+                    <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>end</span>
+                    <strong className="mono">{endIdx}</strong>
+                  </div>
+                  <input type="range" min={0} max={5} value={endIdx} onChange={(e) => setEndIdx(Number(e.target.value))} style={{ accentColor: 'var(--amber)' }} />
+                </label>
               </div>
-              <input type="range" min={0} max={5} value={beginIdx} onChange={(e) => setBeginIdx(Number(e.target.value))} style={{ accentColor: 'var(--cyan)' }} />
-            </label>
-            <label className="control-tile">
-              <div className="deck-row-between">
-                <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>end</span>
-                <strong className="mono">{endIdx}</strong>
+
+              {reconFeedback && (
+                <div className={`deck-feedback ${reconStatus === 'error' ? 'err' : 'ok'}`}>
+                  {reconFeedback}
+                </div>
+              )}
+
+              <div className="deck-actions">
+                <button
+                  type="button"
+                  className="tac-btn primary deck-primary-cta"
+                  onClick={handleFireSlice}
+                >
+                  <Scissors size={14} />
+                  <span>FIRE LASER: s.substring({beginIdx}, {endIdx})</span>
+                </button>
               </div>
-              <input type="range" min={0} max={5} value={endIdx} onChange={(e) => setEndIdx(Number(e.target.value))} style={{ accentColor: 'var(--amber)' }} />
-            </label>
-          </div>
+            </>
+          ) : (
+            <>
+              <div className="step-done-pill">
+                <span className="mono">✓ &quot;RON&quot; sliced with substring(1, 4)</span>
+                <button
+                  type="button"
+                  className="step-adjust-btn"
+                  onClick={() => {
+                    sound.click();
+                    setAdjustingSlice(true);
+                  }}
+                >
+                  {lang === 'zh-Hant' ? '重切' : 'Adjust'}
+                </button>
+              </div>
 
-          <div className="deck-secondary-row">
-            <button type="button" className="tac-btn ghost compact-btn" onClick={handleTestOob}>
-              <AlertTriangle size={13} />
-              <span>{oobSeen ? '✓ ' : ''}Test OOB (1, 7)</span>
-            </button>
-            <button type="button" className="tac-btn ghost compact-btn" onClick={handleTestImmutable}>
-              <span>{immutableSeen ? '✓ ' : ''}Test Immutable</span>
-            </button>
-          </div>
+              <div className="deck-two-col">
+                <button type="button" className="tac-btn crimson deck-primary-cta" onClick={handleTestOob}>
+                  <AlertTriangle size={14} />
+                  <span>{oobSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '實測越界 OOB (1, 7)' : 'Test OOB (1, 7)'}</span>
+                </button>
+                <button type="button" className="tac-btn amber deck-primary-cta" onClick={handleTestImmutable}>
+                  <span>{immutableSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '實測字串不可變' : 'Test Immutability'}</span>
+                </button>
+              </div>
 
-          {reconFeedback && (
-            <div className={`deck-feedback ${reconStatus === 'error' ? 'err' : 'ok'}`}>
-              {reconFeedback}
-            </div>
+              {reconFeedback && (
+                <div className={`deck-feedback ${reconStatus === 'error' ? 'err' : 'ok'}`}>
+                  {reconFeedback}
+                </div>
+              )}
+            </>
           )}
 
-          <div className="deck-actions">
+          {progress.reconDone && (
             <button
               type="button"
-              className={`tac-btn ${progress.reconDone ? 'ghost' : 'primary'} deck-primary-cta`}
-              onClick={handleFireSlice}
+              className="quiet-proceed-link"
+              onClick={() => {
+                sound.click();
+                setTraceFrames([]);
+                onPhaseChange('breach');
+              }}
             >
-              <Scissors size={14} />
-              <span>{slicedOk ? '✓ ' : ''}FIRE: s.substring({beginIdx}, {endIdx})</span>
+              <span>{lang === 'zh-Hant' ? '前往 Phase 2：邏輯鎖' : 'Proceed to Phase 2: Breach'}</span>
+              <ArrowRight size={14} />
             </button>
-
-            {progress.reconDone && (
-              <button
-                type="button"
-                className="tac-btn primary deck-primary-cta"
-                onClick={() => {
-                  sound.click();
-                  setTraceFrames([]);
-                  onPhaseChange('breach');
-                }}
-              >
-                <span>{lang === 'zh-Hant' ? '前往 Phase 2 突入' : 'PROCEED TO BREACH'}</span>
-                <ArrowRight size={15} />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       )}
 
@@ -421,8 +581,15 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
           locks={CH03_LOCKS}
           solvedLocks={solvedLocks}
           lang={lang}
-          onMistake={() => onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }))}
+          onMistake={() => {
+            onUpdateProgress((p) => ({ ...p, breachMistakes: p.breachMistakes + 1 }));
+            setFeedbackBar({
+              mood: 'danger',
+              text: lang === 'zh-Hant' ? '注意索引從 0 開始且 substring 不含終點索引！' : 'Check 0-based index bounds and String immutability!',
+            });
+          }}
           onTraceLoaded={(frames) => {
+            setFeedbackBar(null);
             setTraceFrames(frames);
             setStepIdx(0);
             setAutoPlaySeq((s) => s + 1);
@@ -438,6 +605,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
                 breachCleared: true,
                 completedPhases: p.completedPhases.includes('breach') ? p.completedPhases : [...p.completedPhases, 'breach'],
               }));
+              setPopup('breach-clear');
             }
           }}
           onProceedToBattle={() => {
@@ -462,6 +630,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
                 setBattleResult(null);
                 setTraceFrames([]);
                 setChaosNote(null);
+                setFeedbackBar(null);
               }}
             >
               {initialsCleared && <Check size={12} strokeWidth={2.5} />}
@@ -478,22 +647,13 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
                 setBattleResult(null);
                 setTraceFrames([]);
                 setChaosNote(null);
+                setFeedbackBar(null);
               }}
             >
               {routeCleared && <Check size={12} strokeWidth={2.5} />}
               <span>02 Route Extractor</span>
             </button>
           </div>
-
-          <p className="mission-goal">
-            {encounter === 'initials'
-              ? lang === 'zh-Hant'
-                ? '回傳兩個名字的首字母縮寫 (例："Mira" 與 "Byte" → "MB")。'
-                : 'Return the uppercase/first-letter initials of both names (e.g., "Mira", "Byte" → "MB").'
-              : lang === 'zh-Hant'
-                ? '使用 indexOf("-") 與 substring(...) 抽出 "-" 後方的路線代碼；無 "-" 時回傳 ""。'
-                : 'Use indexOf("-") and substring(...) to return everything after "-"; return "" if missing.'}
-          </p>
 
           <CodeTerminal
             value={encounter === 'initials' ? initialsCode : routeCode}
@@ -611,6 +771,15 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {popupConfig && (
+        <MissionPopup
+          {...popupConfig}
+          lang={lang}
+          skipBriefings={skipBriefings}
+          onToggleSkipBriefings={onToggleSkipBriefings}
+        />
       )}
     </MissionStageLayout>
   );
