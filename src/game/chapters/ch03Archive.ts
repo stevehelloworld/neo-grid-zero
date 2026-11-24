@@ -53,8 +53,8 @@ System.out.println(part);`,
     id: 'ch03-lock-3',
     title: { en: 'ARCHIVE LOCK 03 // MATH.RANDOM RANGE', zh: '檔案鎖 03 // Math.random 範圍換算' },
     prompt: {
-      en: 'Which values can roll produce?',
-      zh: '以下程式碼執行後，roll 可能是哪個範圍的值？',
+      en: 'Math.random() returns a decimal in [0.0, 1.0) (never 1.0). Which values can roll produce?',
+      zh: '提示：Math.random() 回傳 [0.0, 1.0) 的小數（永遠小於 1.0）。執行後 roll 可能是哪個範圍的值？',
     },
     code: `int roll = (int) (Math.random() * 6) + 1;`,
     options: [
@@ -72,18 +72,23 @@ System.out.println(part);`,
 ];
 
 export const CH03_INITIALS_STARTER = `static String initials(String first, String last) {
-    // Return "F.L." preserving original case (both inputs non-empty)
+    // Example: initials("Ada", "Lovelace") -> "A.L."
+    // Example: initials("grace", "Hopper") -> "g.H." (keep original case!)
+    // Hint: first.substring(0, 1) + "." + last.substring(0, 1) + "."
     return "";
 }`;
 
 export const CH03_ROUTE_STARTER = `static String routeSuffix(String route) {
-    // route contains exactly one "-" and at least one character after it
-    // Return the substring after the hyphen
+    // Example: routeSuffix("west-42") -> "42"
+    // Example: routeSuffix("A-7") -> "7"
+    // Hint: int dash = route.indexOf("-"); then route.substring(dash + 1)
     return "";
 }`;
 
 export interface Ch03TrialResult {
   label: string;
+  inputCall: string;
+  initialsPair?: { first: string; last: string };
   waveIndex: number;
   passed: boolean;
   actual: string;
@@ -122,7 +127,16 @@ export function evaluateInitialsEncounter(source: string): Ch03EncounterResult {
       const run = runMethodCall(source, 'initials', item.args);
       const actual = run.ok && run.returnValue?.type === 'String' ? String(run.returnValue.value) : 'ERROR';
       const passed = run.ok && actual === item.expected;
-      const tr: Ch03TrialResult = { label: item.label, waveIndex: w, passed, actual, expected: item.expected, run };
+      const tr: Ch03TrialResult = {
+        label: item.label,
+        inputCall: `initials("${item.args[0]}", "${item.args[1]}")`,
+        initialsPair: { first: item.args[0], last: item.args[1] },
+        waveIndex: w,
+        passed,
+        actual,
+        expected: item.expected,
+        run,
+      };
       trials.push(tr);
       if (!passed) {
         waveOk = false;
@@ -171,7 +185,15 @@ export function evaluateRouteEncounter(source: string, customRoute?: string): Ch
       const run = runMethodCall(source, 'routeSuffix', [item.route]);
       const actual = run.ok && run.returnValue?.type === 'String' ? String(run.returnValue.value) : 'ERROR';
       const passed = run.ok && actual === item.expected;
-      const tr: Ch03TrialResult = { label: item.route, waveIndex: w, passed, actual, expected: item.expected, run };
+      const tr: Ch03TrialResult = {
+        label: item.route,
+        inputCall: `routeSuffix("${item.route}")`,
+        waveIndex: w,
+        passed,
+        actual,
+        expected: item.expected,
+        run,
+      };
       trials.push(tr);
       if (!passed) {
         waveOk = false;

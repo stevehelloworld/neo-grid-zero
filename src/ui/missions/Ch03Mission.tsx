@@ -65,13 +65,16 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
   const [beginIdx, setBeginIdx] = useState(progress.reconDone ? 1 : 0);
   const [endIdx, setEndIdx] = useState(progress.reconDone ? 4 : 3);
   const [adjustingSlice, setAdjustingSlice] = useState(false);
-  const [slicedText, setSlicedText] = useState(progress.reconDone ? 'RON' : 'DRO');
+  const [slicedText, setSlicedText] = useState(progress.reconDone ? 'RON' : '');
   const [slicedOk, setSlicedOk] = useState(progress.reconDone);
   const [oobSeen, setOobSeen] = useState(progress.reconDone);
   const [immutableSeen, setImmutableSeen] = useState(progress.reconDone);
   const [reconStatus, setReconStatus] = useState<'idle' | 'ok' | 'error'>(progress.reconDone ? 'ok' : 'idle');
   const [reconFeedback, setReconFeedback] = useState('');
   const [pulseKey, setPulseKey] = useState(0);
+
+  const reconClearTimerRef = useRef<number | null>(null);
+  const reconClearPoppedRef = useRef(progress.reconDone);
 
   // Phase 2: Breach
   const [solvedLocks, setSolvedLocks] = useState<boolean[]>(
@@ -100,8 +103,20 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
   const suppressNextBriefRef = useRef(false);
 
   useEffect(() => {
+    return () => {
+      if (reconClearTimerRef.current !== null) {
+        window.clearTimeout(reconClearTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (prevPhaseRef.current === phase) return;
     prevPhaseRef.current = phase;
+    if (reconClearTimerRef.current !== null) {
+      window.clearTimeout(reconClearTimerRef.current);
+      reconClearTimerRef.current = null;
+    }
     setFeedbackBar(null);
     if (suppressNextBriefRef.current) {
       suppressNextBriefRef.current = false;
@@ -157,7 +172,16 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         reconDone: true,
         completedPhases: p.completedPhases.includes('recon') ? p.completedPhases : [...p.completedPhases, 'recon'],
       }));
-      setPopup('recon-clear');
+      if (!reconClearPoppedRef.current) {
+        reconClearPoppedRef.current = true;
+        if (reconClearTimerRef.current !== null) {
+          window.clearTimeout(reconClearTimerRef.current);
+        }
+        reconClearTimerRef.current = window.setTimeout(() => {
+          setPopup('recon-clear');
+          reconClearTimerRef.current = null;
+        }, 1400);
+      }
     }
   };
 
@@ -171,11 +195,16 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       sound.hitError();
       setReconStatus('error');
       setSlicedText('OOB ERROR');
-      setOobSeen(true);
-      const errText = run.error?.message ?? 'StringIndexOutOfBoundsException';
+      if (slicedOk) setOobSeen(true);
+      const errText =
+        beginIdx > endIdx
+          ? lang === 'zh-Hant'
+            ? `begin (${beginIdx}) 大於 end (${endIdx}) 會觸發超出範圍錯誤！請保持 begin <= end。`
+            : `begin (${beginIdx}) > end (${endIdx}) throws StringIndexOutOfBoundsException! Keep begin <= end.`
+          : (run.error?.message ?? 'StringIndexOutOfBoundsException');
       setReconFeedback(errText);
       setFeedbackBar({ mood: 'danger', text: errText });
-      markReconIfReady(slicedOk, true, immutableSeen);
+      if (slicedOk) markReconIfReady(true, true, immutableSeen);
       return;
     }
     const out = run.stdout.trim();
@@ -191,7 +220,14 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
     } else {
       sound.click();
       setReconStatus('idle');
-      const hint = `s.substring(${beginIdx}, ${endIdx}) → "${out}". Target is "RON".`;
+      const hint =
+        beginIdx === 1 && endIdx === 3
+          ? lang === 'zh-Hant'
+            ? 's.substring(1, 3) → "RO" — 停在索引 3（\'N\'）前面了！把 end 調成 4 才會包含 \'N\'。'
+            : 's.substring(1, 3) → "RO" — it stopped BEFORE index 3 (\'N\')! Set end = 4 to include \'N\'.'
+          : lang === 'zh-Hant'
+            ? `s.substring(${beginIdx}, ${endIdx}) → "${out}"。目標是 "RON"（索引 1、2、3）。`
+            : `s.substring(${beginIdx}, ${endIdx}) → "${out}". Target is "RON" (indexes 1, 2, 3).`;
       setReconFeedback(hint);
       setFeedbackBar({ mood: 'alert', text: hint });
     }
@@ -264,7 +300,9 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         mood: 'danger',
         text: focusTrial?.run.error
           ? `Line ${focusTrial.run.error.line}: ${focusTrial.run.error.message}`
-          : `Expected "${focusTrial?.expected}", got "${focusTrial?.actual}".`,
+          : lang === 'zh-Hant'
+            ? `${focusTrial?.inputCall ?? ''} 預期 "${focusTrial?.expected}"，實際得到 "${focusTrial?.actual}"。`
+            : `${focusTrial?.inputCall ?? ''} → expected "${focusTrial?.expected}", got "${focusTrial?.actual}".`,
       });
       return;
     }
@@ -327,13 +365,19 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       if (!slicedOk || adjustingSlice) {
         return {
           stepTag: 'STEP 1 / 2',
-          instruction: lang === 'zh-Hant' ? '調整拉桿從 "DRONE" 切出 "RON"' : 'Set begin/end sliders to slice "RON"',
+          instruction:
+            lang === 'zh-Hant'
+              ? '調整拉桿從 "DRONE" 切出 "RON"'
+              : 'Set begin/end sliders to slice "RON" from "DRONE"',
           onOpenGuide: openGuide,
         };
       }
       return {
         stepTag: 'STEP 2 / 2',
-        instruction: lang === 'zh-Hant' ? '點選一個字串陷阱進行實測' : 'Trigger 1 String trap below',
+        instruction:
+          lang === 'zh-Hant'
+            ? '點選下方任一「字串陷阱示範」進行實測'
+            : 'Click 1 String trap demo below to test it',
         onOpenGuide: openGuide,
       };
     }
@@ -348,13 +392,19 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
       if (encounter === 'initials') {
         return {
           stepTag: 'WARM-UP · 1 / 2',
-          instruction: lang === 'zh-Hant' ? '取出兩字首字母並大寫輸出' : 'Return initials of both names (e.g. "MB")',
+          instruction:
+            lang === 'zh-Hant'
+              ? '回傳 "F.L." 並保留原大小寫（例："Ada","Lovelace" → "A.L."）'
+              : 'Return "F.L." keeping original case (e.g. "Ada","Lovelace" → "A.L.")',
           onOpenGuide: openGuide,
         };
       }
       return {
         stepTag: 'BOSS · 2 / 2',
-        instruction: lang === 'zh-Hant' ? '用 indexOf("-") 抽出 "-" 後方的路線代碼' : 'Extract everything after "-" safely',
+        instruction:
+          lang === 'zh-Hant'
+            ? '用 indexOf("-") 抽出 "-" 後方的路線代碼'
+            : 'Use indexOf("-") to return everything after "-"',
         onOpenGuide: openGuide,
       };
     }
@@ -432,6 +482,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
           setPopup(null);
           setEncounter('route');
           setBattleResult(null);
+          setInspectedTrial(null);
           setTraceFrames([]);
         },
         onSecondary: () => setPopup(null),
@@ -469,6 +520,12 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
           activeFrame={currentFrame}
           bossShields={3}
           brokenShields={brokenShields}
+          showBoss={phase === 'battle' && encounter === 'route'}
+          initialsPair={
+            phase === 'battle' && encounter === 'initials'
+              ? (inspectedTrial?.initialsPair ?? { first: 'Ada', last: 'Lovelace' })
+              : null
+          }
           status={phase === 'recon' ? reconStatus : battleResult ? (battleResult.passed ? 'ok' : 'error') : 'idle'}
           pulseKey={pulseKey}
         />
@@ -491,20 +548,52 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
         <div className="deck-stack">
           {!slicedOk || adjustingSlice ? (
             <>
+              <div className="mission-goal mono">
+                {lang === 'zh-Hant'
+                  ? 'D[0] R[1] O[2] N[3] E[4] — substring(begin, end) 從 begin 開始，停在 end 前一格（不含 end）。'
+                  : 'D[0] R[1] O[2] N[3] E[4] — substring(begin, end) starts at begin and stops BEFORE end.'}
+              </div>
+
               <div className="deck-two-col">
                 <label className="control-tile">
                   <div className="deck-row-between">
                     <span className="mono" style={{ fontSize: 12, color: 'var(--cyan)' }}>begin</span>
                     <strong className="mono">{beginIdx}</strong>
                   </div>
-                  <input type="range" min={0} max={5} value={beginIdx} onChange={(e) => setBeginIdx(Number(e.target.value))} style={{ accentColor: 'var(--cyan)' }} />
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    value={beginIdx}
+                    onChange={(e) => {
+                      setBeginIdx(Number(e.target.value));
+                      setSlicedText('');
+                      setReconStatus('idle');
+                      setReconFeedback('');
+                      setFeedbackBar(null);
+                    }}
+                    style={{ accentColor: 'var(--cyan)' }}
+                  />
                 </label>
                 <label className="control-tile">
                   <div className="deck-row-between">
                     <span className="mono" style={{ fontSize: 12, color: 'var(--amber)' }}>end</span>
                     <strong className="mono">{endIdx}</strong>
                   </div>
-                  <input type="range" min={0} max={5} value={endIdx} onChange={(e) => setEndIdx(Number(e.target.value))} style={{ accentColor: 'var(--amber)' }} />
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    value={endIdx}
+                    onChange={(e) => {
+                      setEndIdx(Number(e.target.value));
+                      setSlicedText('');
+                      setReconStatus('idle');
+                      setReconFeedback('');
+                      setFeedbackBar(null);
+                    }}
+                    style={{ accentColor: 'var(--amber)' }}
+                  />
                 </label>
               </div>
 
@@ -544,10 +633,10 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
               <div className="deck-two-col">
                 <button type="button" className="tac-btn crimson deck-primary-cta" onClick={handleTestOob}>
                   <AlertTriangle size={14} />
-                  <span>{oobSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '實測越界 OOB (1, 7)' : 'Test OOB (1, 7)'}</span>
+                  <span>{oobSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '超出範圍：substring(1, 7)' : 'Out-of-Bounds: substring(1, 7)'}</span>
                 </button>
                 <button type="button" className="tac-btn amber deck-primary-cta" onClick={handleTestImmutable}>
-                  <span>{immutableSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '實測字串不可變' : 'Test Immutability'}</span>
+                  <span>{immutableSeen ? '✓ ' : ''}{lang === 'zh-Hant' ? '字串不可變：沒存回變數' : 'Immutability: s.substring(0, 3);'}</span>
                 </button>
               </div>
 
@@ -565,6 +654,10 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
               className="quiet-proceed-link"
               onClick={() => {
                 sound.click();
+                if (reconClearTimerRef.current !== null) {
+                  window.clearTimeout(reconClearTimerRef.current);
+                  reconClearTimerRef.current = null;
+                }
                 setTraceFrames([]);
                 onPhaseChange('breach');
               }}
@@ -628,6 +721,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
                 sound.click();
                 setEncounter('initials');
                 setBattleResult(null);
+                setInspectedTrial(null);
                 setTraceFrames([]);
                 setChaosNote(null);
                 setFeedbackBar(null);
@@ -645,6 +739,7 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
                 sound.click();
                 setEncounter('route');
                 setBattleResult(null);
+                setInspectedTrial(null);
                 setTraceFrames([]);
                 setChaosNote(null);
                 setFeedbackBar(null);
@@ -655,11 +750,45 @@ export const Ch03Mission: React.FC<Ch03MissionProps> = ({
             </button>
           </div>
 
+          <div className="mission-goal mono">
+            {encounter === 'initials'
+              ? 'initials("Ada", "Lovelace") → "A.L."  ·  initials("grace", "Hopper") → "g.H."'
+              : 'routeSuffix("west-42") → "42"  ·  routeSuffix("A-7") → "7"'}
+          </div>
+
           <CodeTerminal
             value={encounter === 'initials' ? initialsCode : routeCode}
             starterCode={encounter === 'initials' ? CH03_INITIALS_STARTER : CH03_ROUTE_STARTER}
             activeLine={currentFrame?.line ?? null}
             lang={lang}
+            quickRefContent={
+              <div className="mono quickref-lines">
+                <div>
+                  <strong style={{ color: 'var(--cyan)' }}>s.substring(begin, end)</strong> ·{' '}
+                  {lang === 'zh-Hant'
+                    ? '取索引 begin 到 end - 1（例："Ada".substring(0, 1) → "A"）'
+                    : 'indexes [begin, end - 1] (e.g. "Ada".substring(0, 1) → "A")'}
+                </div>
+                <div>
+                  <strong style={{ color: 'var(--cyan)' }}>s.substring(begin)</strong> ·{' '}
+                  {lang === 'zh-Hant' ? '從 begin 一路取到字串結尾' : 'from begin through end of String'}
+                </div>
+                <div>
+                  <strong style={{ color: 'var(--amber)' }}>s.indexOf("-")</strong> ·{' '}
+                  {lang === 'zh-Hant' ? '回傳 "-" 所在索引（找不到回傳 -1）' : 'index of "-" (-1 if missing)'}
+                </div>
+                <div>
+                  <strong style={{ color: 'var(--cyan)' }}>+</strong> ·{' '}
+                  {lang === 'zh-Hant'
+                    ? '串接字串與字元（例：a + "." + b + "."）'
+                    : 'concatenates Strings (e.g. a + "." + b + ".")'}
+                </div>
+                <div>
+                  <strong style={{ color: 'var(--cyan)' }}>s.length()</strong> ·{' '}
+                  {lang === 'zh-Hant' ? '回傳字串字元數' : 'number of characters'}
+                </div>
+              </div>
+            }
             onChange={(next) => onUpdateProgress((p) => ({ ...p, codeDrafts: { ...p.codeDrafts, [encounter]: next } }))}
           />
 

@@ -305,7 +305,10 @@ export const Ch02Mission: React.FC<Ch02MissionProps> = ({
       }
       return {
         stepTag: 'BOSS · 2 / 2',
-        instruction: lang === 'zh-Hant' ? '加上手續費並轉型 (double) 避免分帳截斷' : 'Apply compound ops & cast before dividing to defeat Boss',
+        instruction:
+          lang === 'zh-Hant'
+            ? '計算稅金與折扣（+=、-=）、轉型 (double) 並執行 orders++'
+            : 'Apply tax/discount (+=, -=), cast (double), and orders++',
         onOpenGuide: openGuide,
       };
     }

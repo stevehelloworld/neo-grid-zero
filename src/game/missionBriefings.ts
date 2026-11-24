@@ -101,8 +101,14 @@ export const MISSION_BRIEFINGS: Record<number, ChapterBriefingSpec> = {
     recon: {
       title: { en: 'Slice String Indexes', zh: '掌握字串切片與越界陷阱' },
       steps: [
-        { en: 'Set begin/end sliders to slice "RON" from "DRONE".', zh: '調整起訖拉桿，從 "DRONE" 切出 "RON"。' },
-        { en: 'Trigger one OOB or Immutability anomaly test.', zh: '接著點選一次「越界」或「不可變性」測試。' },
+        {
+          en: 'Drag begin & end to slice "RON" from "DRONE" (begin is included, end stops BEFORE that index).',
+          zh: '拖動拉桿從 "DRONE" 切出 "RON"（包含 begin，但停在 end 前一格！）。',
+        },
+        {
+          en: 'Click 1 String Trap demo below to see out-of-bounds errors or String immutability.',
+          zh: '點選下方任一「字串陷阱示範」，觀察超出範圍報錯或字串不可變性。',
+        },
       ],
       clearTitle: { en: 'Recon Complete!', zh: '檔案偵查完成！' },
       takeaway: {
@@ -125,15 +131,21 @@ export const MISSION_BRIEFINGS: Record<number, ChapterBriefingSpec> = {
     battle: {
       title: { en: 'Defeat Immutable Archivist', zh: '迎戰不變檔案官' },
       steps: [
-        { en: 'Pass 01 Initials Slicer with substring(0, 1).', zh: '先用 substring(0, 1) 完成 01 首字母提取。' },
-        { en: 'Extract routeSuffix after "-" safely in 02.', zh: '再用 indexOf("-") 安全切出 "-" 後方代碼擊敗 Boss。' },
+        {
+          en: '01 Initials Slicer: return "F.L." with dots, keeping original case ("Ada","Lovelace" → "A.L.").',
+          zh: '01 首字母切片：回傳含句點的 "F.L." 並保留原大小寫（"Ada","Lovelace" → "A.L."）。',
+        },
+        {
+          en: '02 Route Extractor: use indexOf("-") to return everything after "-" ("west-42" → "42").',
+          zh: '02 路線代碼提取：用 indexOf("-") 找到 "-" 並回傳後方全部字元（"west-42" → "42"）。',
+        },
       ],
       warmupClearTitle: { en: 'Slicer Cleared!', zh: '首字母切片過關！' },
       bossName: { en: 'IMMUTABLE ARCHIVIST', zh: '不變檔案官' },
       clearTitle: { en: 'Archivist Neutralized!', zh: '不變檔案官瓦解！' },
       takeaway: {
-        en: 'Pair indexOf() guards with substring(pos + 1) to handle missing delimiters cleanly.',
-        zh: '先檢查 indexOf() != -1 再切 substring(pos + 1)，就能安全應對缺分隔符的輸入。',
+        en: 'Combine indexOf("-") + 1 with substring(start) to slice variable-length suffixes cleanly.',
+        zh: '搭配 indexOf("-") + 1 與單參數 substring(start)，無論前綴多長都能準確切出後半段。',
       },
     },
   },
@@ -204,7 +216,7 @@ export const MISSION_BRIEFINGS: Record<number, ChapterBriefingSpec> = {
     battle: {
       title: { en: 'Defeat Infinite Coil', zh: '迎戰無窮電圈' },
       steps: [
-        { en: 'Implement rounds(start, gain, target) with a loop.', zh: '用迴圈累積加上 gain 並記錄輪數。' },
+        { en: 'Implement rounds(start, gain, target) with a loop.', zh: '用迴圈實作 rounds(start, gain, target) 累積加上 gain 並記錄輪數。' },
         { en: 'Handle start >= target returning 0 safely.', zh: '確保起始已達標 (start >= target) 時回傳 0。' },
       ],
       bossName: { en: 'INFINITE COIL', zh: '無窮電圈' },
@@ -243,7 +255,7 @@ export const MISSION_BRIEFINGS: Record<number, ChapterBriefingSpec> = {
     battle: {
       title: { en: 'Defeat Noise Phantom', zh: '迎戰雜訊幻影' },
       steps: [
-        { en: 'Scan readings with charAt(i) == \'O\' or substring.', zh: '以 for 迴圈逐字元檢查是否為 O。' },
+        { en: 'Scan readings with charAt(i) == \'O\' or substring.', zh: '用 for 迴圈搭配 charAt(i) == \'O\' 或 substring 逐字元掃描。' },
         { en: 'Maintain both cur and best in one pass ("" → 0).', zh: '單次掃描同時更新 cur 與 best（空字串回傳 0）。' },
       ],
       bossName: { en: 'NOISE PHANTOM', zh: '雜訊幻影' },
@@ -282,7 +294,7 @@ export const MISSION_BRIEFINGS: Record<number, ChapterBriefingSpec> = {
     battle: {
       title: { en: 'Defeat Quadratic Hydra', zh: '迎戰平方九頭蛇' },
       steps: [
-        { en: 'Build rows lines where line r has r "#" symbols.', zh: '實作 sweep(rows) 輸出第 r 列含 r 個 # 的三角形。' },
+        { en: 'Implement sweep(rows): build rows lines where line r has r "#" symbols.', zh: '實作 sweep(rows) 輸出第 r 列含 r 個 # 的三角形。' },
         { en: 'Join lines with "\\n" (no trailing newline, sweep(0) -> "").', zh: '列間加 "\\n" 但最末行不可加（sweep(0) 回傳 ""）。' },
       ],
       bossName: { en: 'QUADRATIC HYDRA', zh: '平方九頭蛇' },

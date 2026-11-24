@@ -339,7 +339,7 @@ export const Ch01Mission: React.FC<Ch01MissionProps> = ({
       }
       return {
         stepTag: 'STEP 2 / 2',
-        instruction: lang === 'zh-Hant' ? '預測 120 - 45 結果並按 EXECUTE' : 'Predict remaining & press EXECUTE',
+        instruction: lang === 'zh-Hant' ? '預測 120 - 45 結果並按 EXECUTE' : 'Predict 120 - 45 & press EXECUTE',
         onOpenGuide: openGuide,
       };
     }

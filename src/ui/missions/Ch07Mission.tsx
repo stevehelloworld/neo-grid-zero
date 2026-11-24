@@ -249,7 +249,10 @@ export const Ch07Mission: React.FC<Ch07MissionProps> = ({
     if (phase === 'battle') {
       return {
         stepTag: 'BOSS BATTLE',
-        instruction: lang === 'zh-Hant' ? '實作 sweep(rows) 三角形圖樣且最末行無 \\n' : 'Implement sweep(rows) with no trailing \\n',
+        instruction:
+          lang === 'zh-Hant'
+            ? '實作 sweep(rows) 三角形圖樣且最末行無 \\n'
+            : 'Implement sweep(rows) triangle pattern with no trailing \\n',
         onOpenGuide: openGuide,
       };
     }

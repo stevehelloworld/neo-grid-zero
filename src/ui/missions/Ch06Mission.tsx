@@ -281,7 +281,7 @@ export const Ch06Mission: React.FC<Ch06MissionProps> = ({
     if (phase === 'breach') {
       return {
         stepTag: 'PHASE 2 · BREACH',
-        instruction: lang === 'zh-Hant' ? '小心全負數 traps 破解 4 道演算法鎖' : 'Watch negative extrema & crack 4 locks',
+        instruction: lang === 'zh-Hant' ? '小心全負數陷阱並破解 4 道演算法鎖' : 'Watch negative extrema & crack 4 locks',
         onOpenGuide: openGuide,
       };
     }

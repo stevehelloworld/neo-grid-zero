@@ -287,7 +287,10 @@ export const Ch05Mission: React.FC<Ch05MissionProps> = ({
       }
       return {
         stepTag: 'STEP 2 / 2',
-        instruction: lang === 'zh-Hant' ? '按 PULSE (+4) 充能至 14 以上' : 'Pulse-charge from 3 to >= 14',
+        instruction:
+          lang === 'zh-Hant'
+            ? '按 PULSE (+4) 從 3 充能至 14 以上'
+            : 'Press PULSE (+4) from 3 until >= 14',
         onOpenGuide: openGuide,
       };
     }

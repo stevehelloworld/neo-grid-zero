@@ -102,15 +102,19 @@ export const App: React.FC = () => {
 
   const openChapter = (chapterId: number, forcedPhase?: PhaseId, fromGm = false) => {
     const ch = CAMPAIGN_CHAPTERS.find((c) => c.id === chapterId);
+    const targetPhase = forcedPhase ?? 'recon';
+    const willShowBriefing = targetPhase !== 'debrief' && !fromGm && !state.skipBriefings;
     setSuppressAutoBriefing(fromGm);
     setActiveChapterId(chapterId);
-    setActivePhase(forcedPhase ?? 'recon');
+    setActivePhase(targetPhase);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    triggerCutIn({
-      tag: ch?.code ?? `SEC-${String(chapterId).padStart(2, '0')}`,
-      title: `${(ch?.title.en ?? 'SECTOR').toUpperCase()} // ENGAGED`,
-      tone: 'cyan',
-    });
+    if (!willShowBriefing) {
+      triggerCutIn({
+        tag: ch?.code ?? `SEC-${String(chapterId).padStart(2, '0')}`,
+        title: `${(ch?.title.en ?? 'SECTOR').toUpperCase()} // ENGAGED`,
+        tone: 'cyan',
+      });
+    }
   };
 
   const activeProgress =
