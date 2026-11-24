@@ -1,0 +1,40 @@
+:root {
+  /* Core Surfaces */
+  --bg-void: #060b12;
+  --bg-panel: #0b1420;
+  --bg-elevated: #111f30;
+  --bg-glass: rgba(11, 20, 32, 0.86);
+  --border-subtle: rgba(124, 155, 176, 0.22);
+  --border-active: rgba(0, 240, 255, 0.52);
+
+  /* Ink */
+  --ink-primary: #e8f4f2;
+  --ink-secondary: #b5cad7;
+  --ink-muted: #7c9bb0;
+
+  /* Semantic Accents */
+  --cyan: #00f0ff;
+  --cyan-dim: rgba(0, 240, 255, 0.14);
+  --amber: #ff9500;
+  --amber-dim: rgba(255, 149, 0, 0.16);
+  --lime: #b8ff3c;
+  --lime-dim: rgba(184, 255, 60, 0.15);
+  --crimson: #ff2a5f;
+  --crimson-dim: rgba(255, 42, 95, 0.18);
+
+  /* Typography */
+  --font-display: 'Chakra Petch', 'Noto Sans TC', system-ui, sans-serif;
+  --font-body: 'Space Grotesk', 'Noto Sans TC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Radii & Chamfer */
+  --cut-sm: 8px;
+  --cut-md: 14px;
+  --cut-lg: 20px;
+
+  /* Elevation */
+  --glow-cyan: 0 0 18px rgba(0, 240, 255, 0.24);
+  --glow-amber: 0 0 18px rgba(255, 149, 0, 0.24);
+  --glow-lime: 0 0 18px rgba(184, 255, 60, 0.24);
+  --glow-crimson: 0 0 18px rgba(255, 42, 95, 0.3);
+}
